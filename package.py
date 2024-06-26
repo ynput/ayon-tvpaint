@@ -1,6 +1,6 @@
 name = "tvpaint"
 title = "TVPaint"
-version = "0.2.2"
+version = "0.2.3"
 client_dir = "ayon_tvpaint"
 
 ayon_required_addons = {
