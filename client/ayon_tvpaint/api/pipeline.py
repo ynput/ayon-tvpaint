@@ -159,8 +159,12 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
     def work_root(self, session):
         return session["AYON_WORKDIR"]
 
-    def get_current_workfile(self):
-        return execute_george("tv_GetProjectName")
+    def get_current_workfile(self):        
+        # TVPaint returns a '\' character when no scene is currently opened
+        current_workfile = execute_george("tv_GetProjectName")
+        if current_workfile == '\\':
+            return None
+        return current_workfile
 
     def workfile_has_unsaved_changes(self):
         return None
