@@ -159,7 +159,7 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
     def work_root(self, session):
         return session["AYON_WORKDIR"]
 
-    def get_current_workfile(self):        
+    def get_current_workfile(self):
         # TVPaint returns a '\' character when no scene is currently opened
         current_workfile = execute_george("tv_GetProjectName")
         if current_workfile == '\\':
