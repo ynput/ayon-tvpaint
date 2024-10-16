@@ -188,12 +188,24 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         global_context = get_global_context()
         project_name = global_context.get("project_name")
         folder_path = global_context.get("folder_path")
+        task_name = global_context.get("task_name")
         if not project_name or not folder_path:
             return
 
         folder_entity = ayon_api.get_folder_by_path(project_name, folder_path)
+        if folder_entity and task_name:
+            task_entity = ayon_api.get_task_by_name(
+                project_name,
+                folder_id=folder_entity["id"],
+                task_name=task_name)
+            context_entity = task_entity
+        else:
+            log.warning(
+                "Falling back to setting context settings using folder entity "
+                "because no task was found.")
+            context_entity = folder_entity
 
-        set_context_settings(project_name, folder_entity)
+        set_context_settings(project_name, context_entity)
 
     def application_exit(self):
         """Logic related to TimerManager.
@@ -470,24 +482,24 @@ def get_containers():
     return output
 
 
-def set_context_settings(project_name, folder_entity):
+def set_context_settings(project_name, task_entity):
     """Set workfile settings by folder entity attributes.
 
     Change fps, resolution and frame start/end.
 
     Args:
         project_name (str): Project name.
-        folder_entity (dict[str, Any]): Folder entity.
+        task_entity (dict[str, Any]): Folder entity.
 
     """
 
-    if not folder_entity:
+    if not task_entity:
         return
 
-    folder_attributes = folder_entity["attrib"]
+    task_attributes = task_entity["attrib"]
 
-    width = folder_attributes.get("resolutionWidth")
-    height = folder_attributes.get("resolutionHeight")
+    width = task_attributes.get("resolutionWidth")
+    height = task_attributes.get("resolutionHeight")
     if width is None or height is None:
         print("Resolution was not found!")
     else:
@@ -495,7 +507,7 @@ def set_context_settings(project_name, folder_entity):
             "tv_resizepage {} {} 0".format(width, height)
         )
 
-    framerate = folder_attributes.get("fps")
+    framerate = task_attributes.get("fps")
 
     if framerate is not None:
         execute_george(
@@ -504,15 +516,15 @@ def set_context_settings(project_name, folder_entity):
     else:
         print("Framerate was not found!")
 
-    frame_start = folder_attributes.get("frameStart")
-    frame_end = folder_attributes.get("frameEnd")
+    frame_start = task_attributes.get("frameStart")
+    frame_end = task_attributes.get("frameEnd")
 
     if frame_start is None or frame_end is None:
         print("Frame range was not found!")
         return
 
-    handle_start = folder_attributes.get("handleStart")
-    handle_end = folder_attributes.get("handleEnd")
+    handle_start = task_attributes.get("handleStart")
+    handle_end = task_attributes.get("handleEnd")
 
     # Always start from 0 Mark In and set only Mark Out
     mark_in = 0

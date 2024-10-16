@@ -17,14 +17,17 @@ class CollectOutputFrameRange(pyblish.api.InstancePlugin):
     settings_category = "tvpaint"
 
     def process(self, instance):
-        folder_entity = instance.data.get("folderEntity")
-        if not folder_entity:
+        entity = instance.data.get("taskEntity")
+        if not entity:
+            # Task may be optional for an instance
+            entity = instance.data.get("folderEntity")
+        if not entity:
             return
 
         context = instance.context
 
-        frame_start = folder_entity["attrib"]["frameStart"]
-        fps = folder_entity["attrib"]["fps"]
+        frame_start = entity["attrib"]["frameStart"]
+        fps = entity["attrib"]["fps"]
         frame_end = frame_start + (
             context.data["sceneMarkOut"] - context.data["sceneMarkIn"]
         )
