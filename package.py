@@ -1,6 +1,6 @@
 name = "tvpaint"
 title = "TVPaint"
-version = "0.2.4-dev.1"
+version = "0.2.4"
 app_host_name = "tvpaint"
 client_dir = "ayon_tvpaint"
 
