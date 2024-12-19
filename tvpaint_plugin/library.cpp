@@ -29,7 +29,6 @@
 static struct {
     bool firstParams;
     DWORD mReq;
-    void* mLocalFile;
     PIFilter *current_filter;
     // Id counter for client requests
     int client_request_id;
@@ -465,23 +464,6 @@ Communicator* communication = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
-static char* GetLocalString( PIFilter* iFilter, int iNum, char* iDefault )
-{
-    char*  str;
-
-    if( Data.mLocalFile == NULL )
-        return  iDefault;
-
-    str = TVGetLocalString( iFilter, Data.mLocalFile, iNum );
-    if( str == NULL  ||  strlen( str ) == 0 )
-        return  iDefault;
-
-    return  str;
-}
-
-/**************************************************************************************/
-//  Localisation
-
 // numbers (like 10011) are IDs in the localized file.
 // strings are the default values to use when the ID is not found
 // in the localized file (or the localized file doesn't exist).
@@ -496,9 +478,9 @@ std::string label_from_evn()
 }
 std::string plugin_label = label_from_evn();
 
-#define TXT_REQUESTER               GetLocalString( iFilter, 100, "AYON Tools" )
+#define TXT_REQUESTER               "AYON Tools"
 
-#define TXT_REQUESTER_ERROR         GetLocalString( iFilter, 30001, "Can't Open Requester !" )
+#define TXT_REQUESTER_ERROR         "Can't Open Requester !"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -558,10 +540,6 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
 
 void FAR PASCAL PI_Close( PIFilter* iFilter )
 {
-    if( Data.mLocalFile )
-    {
-        TVCloseLocalFile( iFilter, Data.mLocalFile );
-    }
     if( Data.mReq )
     {
         TVCloseReq( iFilter, Data.mReq );
