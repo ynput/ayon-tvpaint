@@ -42,7 +42,6 @@ std::string to_utf8(const std::string &codepage_str) {
 
 // mReq Identification of the requester.  (=0 closed, !=0 requester ID)
 static struct {
-    bool firstParams;
     DWORD mReq;
     DWORD tickReq;
     PIFilter *current_filter;
@@ -62,7 +61,6 @@ static struct {
     std::map<int, jsonrpcpp::Response> responses;
 
 } Data = {
-    true,
     0,
     0,
     nullptr,
@@ -246,25 +244,25 @@ public:
                 client_metadata,
                 &m_endpoint,
                 websocketpp::lib::placeholders::_1
-        ));
+       ));
         con->set_fail_handler(websocketpp::lib::bind(
                 &connection_metadata::on_fail,
                 client_metadata,
                 &m_endpoint,
                 websocketpp::lib::placeholders::_1
-        ));
+       ));
         con->set_close_handler(websocketpp::lib::bind(
                 &connection_metadata::on_close,
                 client_metadata,
                 &m_endpoint,
                 websocketpp::lib::placeholders::_1
-        ));
+       ));
         con->set_message_handler(websocketpp::lib::bind(
                 &connection_metadata::on_message,
                 client_metadata,
                 websocketpp::lib::placeholders::_1,
                 websocketpp::lib::placeholders::_2
-        ));
+       ));
 
         m_endpoint.connect(con);
 
@@ -484,30 +482,22 @@ std::string label_from_evn()
 std::string plugin_label = label_from_evn();
 
 #define TXT_REQUESTER               "AYON Tools"
-
-#define TXT_REQUESTER_ERROR         "Can't Open Requester !"
+#define TXT_REQUESTER_ERROR         "Can't Open Requester!"
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
 
-// The functions directly called by Aura through the plugin interface
 
-
-
-/**************************************************************************************/
-// "About" function.
-
-
-void FAR PASCAL PI_About( PIFilter* iFilter )
+void FAR PASCAL PI_About(PIFilter* iFilter)
 {
     char  text[256];
 
-    sprintf( text, "%s %d,%d", iFilter->PIName, iFilter->PIVersion, iFilter->PIRevision );
+    sprintf(text, "%s %d,%d", iFilter->PIName, iFilter->PIVersion, iFilter->PIRevision);
 
     // Just open a warning popup with the filter name and version.
     // You can open a much nicer requester if you want.
-    TVWarning( iFilter, text );
+    TVWarning(iFilter, text);
 }
 
 
@@ -515,11 +505,11 @@ void FAR PASCAL PI_About( PIFilter* iFilter )
 // Function called at Aura startup, when the filter is loaded.
 // Should do as little as possible to keep Aura's startup time small.
 
-int FAR PASCAL PI_Open( PIFilter* iFilter )
+int FAR PASCAL PI_Open(PIFilter* iFilter)
 {
     Data.current_filter = iFilter;
 
-    strcpy( iFilter->PIName, plugin_label.c_str() );
+    strcpy(iFilter->PIName, plugin_label.c_str());
     iFilter->PIVersion = 1;
     iFilter->PIRevision = 0;
 
@@ -527,19 +517,18 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
     char tmp[256];
     char defaultOpen = (env_value != NULL) ? '1' : '0';
     // If this plugin was the one open at Aura shutdown, re-open it
-    TVReadUserString( iFilter, iFilter->PIName, "Open", tmp, &defaultOpen, 255 );
-    if( atoi( tmp ) )
-    {
-        PI_Parameters( iFilter, NULL ); // NULL as iArg means "open the requester"
+    TVReadUserString(iFilter, iFilter->PIName, "Open", tmp, &defaultOpen, 255);
+    if (atoi(tmp)) {
+        // NULL as iArg means "open the requester"
+        PI_Parameters(iFilter, NULL);
     }
+
     if (env_value != NULL) {
         DWORD req = TVOpenReq(
             iFilter, 150, 80, 0, 0, PIRF_HIDDEN_REQ, "AYONticker"
-        );
-        if(req == 0) {
-            TVWarning( iFilter, TXT_REQUESTER_ERROR );
-        } else if (req == Data.mReq) {
-            TVWarning(iFilter, "Tick requester has same id as menu requester");
+       );
+        if (req == 0) {
+            TVWarning(iFilter, TXT_REQUESTER_ERROR);
         }
         Data.tickReq = req;
 
@@ -548,14 +537,14 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
         communication->connect();
         register_callbacks();
     }
-    return  1; // OK
+    return 1;
 }
 
 
 /**************************************************************************************/
 // Aura shutdown: we make all the necessary cleanup
 
-void FAR PASCAL PI_Close( PIFilter* iFilter )
+void FAR PASCAL PI_Close(PIFilter* iFilter)
 {
     if (Data.mReq) {
         TVCloseReq(iFilter, Data.mReq);
@@ -613,7 +602,7 @@ int newMenuItemsProcess(PIFilter* iFilter) {
         menu_title = Data.menuItems["title"].get<nlohmann::json::string_t*>()->c_str();
     }
     // Sets the title of the requester.
-    TVSetReqTitle( iFilter, Data.mReq, menu_title );
+    TVSetReqTitle(iFilter, Data.mReq, menu_title);
 
     // Resize menu
     // First get current position and sizes (we only need the position)
@@ -640,7 +629,7 @@ int newMenuItemsProcess(PIFilter* iFilter) {
         const char *help_text = item_data["help"].get<nlohmann::json::string_t*>()->c_str();
         std::string item_callback = item_data["callback"].get<std::string>();
         TVAddButtonReq(iFilter, Data.mReq, x_pos, y_pos, btn_width, 0, item_id, PIRBF_BUTTON_NORMAL|PIRBF_BUTTON_ACTION, item_label);
-        TVSetButtonInfoText( iFilter, Data.mReq, item_id, help_text );
+        TVSetButtonInfoText(iFilter, Data.mReq, item_id, help_text);
         y_pos += row_height;
 
         Data.menuItemsById[std::to_string(item_id)] = item_callback;
@@ -653,53 +642,43 @@ int newMenuItemsProcess(PIFilter* iFilter) {
 /**************************************************************************************/
 // we have something to do !
 
-int FAR PASCAL PI_Parameters( PIFilter* iFilter, char* iArg )
+int FAR PASCAL PI_Parameters(PIFilter* iFilter, char* iArg)
 {
-    if( !iArg )
-    {
+    if (iArg) {
+        return 1;
+    }
+    if (Data.mReq != 0) {
+        TVReqToFront(iFilter, Data.mReq);
+        return 1;
+    }
 
-        // If the requester is not open, we open it.
-        if( Data.mReq == 0)
-        {
-            // Create empty requester because menu items are defined with
-            //  `define_menu` callback
-            DWORD req = TVOpenFilterReqEx(
-                    iFilter,
-                    185,
-                    20,
-                    NULL,
-                    NULL,
-                    PIRF_STANDARD_REQ | PIRF_COLLAPSABLE_REQ,
-                    FILTERREQ_NO_TBAR
-            );
-            if (req == 0) {
-                TVWarning(iFilter, TXT_REQUESTER_ERROR);
-                return  0;
-            }
-            if (req == Data.tickReq) {
-                TVWarning(iFilter, "Menu requester has same id as tick requester");
-            }
+    // Create empty requester because menu items are defined with
+    //  `define_menu` callback
+    DWORD req = TVOpenFilterReqEx(
+            iFilter,
+            185,
+            20,
+            NULL,
+            NULL,
+            PIRF_STANDARD_REQ | PIRF_COLLAPSABLE_REQ,
+            FILTERREQ_NO_TBAR
+   );
+    if (req == 0) {
+        TVWarning(iFilter, TXT_REQUESTER_ERROR);
+        return 0;
+    }
 
-            Data.mReq = req;
+    Data.mReq = req;
 
-            // This is a very simple requester, so we create it's content right here instead
-            // of waiting for the PICBREQ_OPEN message...
-            // Not recommended for more complex requesters. (see the other examples)
+    // This is a very simple requester, so we create it's content right here instead
+    // of waiting for the PICBREQ_OPEN message...
+    // Not recommended for more complex requesters. (see the other examples)
 
-            // Sets the title of the requester.
-            TVSetReqTitle( iFilter, Data.mReq, TXT_REQUESTER );
+    // Sets the title of the requester.
+    TVSetReqTitle(iFilter, Data.mReq, TXT_REQUESTER);
 
-            if ( Data.firstParams == true ) {
-                Data.firstParams = false;
-            } else {
-                newMenuItemsProcess(iFilter);
-            }
-        }
-        else
-        {
-            // If it is already open, we just put it on front of all other requesters.
-            TVReqToFront( iFilter, Data.mReq );
-        }
+    if (Data.newMenuItems) {
+        newMenuItemsProcess(iFilter);
     }
 
     return  1;
@@ -709,11 +688,11 @@ int FAR PASCAL PI_Parameters( PIFilter* iFilter, char* iArg )
 // something happened that needs our attention.
 // Global variable where current button up data are stored
 std::string button_up_item_id_str;
-int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iArgs )
+int FAR PASCAL PI_Msg(PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iArgs)
 {
     Data.current_filter = iFilter;
     // what did happen ?
-    switch( iEvent )
+    switch(iEvent)
     {
         // The user just 'clicked' on a normal button
         case PICBREQ_BUTTON_UP:
@@ -722,7 +701,7 @@ int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iA
                 std::string callback_name = Data.menuItemsById[button_up_item_id_str].get<std::string>();
                 communication->call_method(callback_name, nlohmann::json::array());
             }
-            TVExecute( iFilter );
+            TVExecute(iFilter);
             break;
 
             // The requester was just closed.
@@ -738,12 +717,18 @@ int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iA
                 // If it was by Aura's shutdown, that means this requester was the
                 // last one open, so we should reopen this one the next time Aura
                 // is started.  Else we won't open it next time.
-                sprintf( tmp, "%d", (int)(iArgs[4]) );
+                sprintf(tmp, "%d", (int)(iArgs[4]));
 
                 // Save it in Aura's init file.
-                TVWriteUserString( iFilter, iFilter->PIName, "Open", tmp );
+                TVWriteUserString(iFilter, iFilter->PIName, "Open", tmp);
             } else if (Data.tickReq == iReq) {
                 Data.tickReq = 0;
+            }
+            break;
+
+        case PICBREQ_OPEN:
+            if (Data.newMenuItems) {
+                newMenuItemsProcess(iFilter);
             }
             break;
 
@@ -757,7 +742,7 @@ int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iA
             break;
     }
 
-    return  1;
+    return 1;
 }
 
 
@@ -768,18 +753,18 @@ int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iA
 // and precompute all the stuff that doesn't change from frame to frame.
 
 
-int FAR PASCAL PI_SequenceStart( PIFilter* iFilter, int iNumImages )
+int FAR PASCAL PI_SequenceStart(PIFilter* iFilter, int iNumImages)
 {
     // In this simple example we don't have anything to allocate/precompute.
 
     // 1 means 'continue', 0 means 'error, abort' (like 'not enough memory')
-    return  1;
+    return 1;
 }
 
 
 // Here you should cleanup what you've done in PI_SequenceStart
 
-void FAR PASCAL PI_SequenceFinish( PIFilter* iFilter )
+void FAR PASCAL PI_SequenceFinish(PIFilter* iFilter)
 {}
 
 
@@ -787,13 +772,13 @@ void FAR PASCAL PI_SequenceFinish( PIFilter* iFilter )
 // This is called before each frame.
 // Here you should allocate memory and precompute all the stuff you can.
 
-int FAR PASCAL PI_Start( PIFilter* iFilter, double iPos, double iSize )
+int FAR PASCAL PI_Start(PIFilter* iFilter, double iPos, double iSize)
 {
-    return  1;
+    return 1;
 }
 
 
-void FAR PASCAL PI_Finish( PIFilter* iFilter )
+void FAR PASCAL PI_Finish(PIFilter* iFilter)
 {
     // nothing special to cleanup
 }
@@ -801,7 +786,7 @@ void FAR PASCAL PI_Finish( PIFilter* iFilter )
 
 /**************************************************************************************/
 // 'Execution' of the filter.
-int FAR PASCAL PI_Work( PIFilter* iFilter )
+int FAR PASCAL PI_Work(PIFilter* iFilter)
 {
-    return  1;
+    return 1;
 }
