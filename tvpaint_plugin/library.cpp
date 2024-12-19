@@ -519,31 +519,28 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
 {
     Data.current_filter = iFilter;
 
-    char defaultOpen = '0';
+    strcpy( iFilter->PIName, plugin_label.c_str() );
+    iFilter->PIVersion = 1;
+    iFilter->PIRevision = 0;
+
     char *env_value = std::getenv("AYON_RPC_URL");
+    char tmp[256];
+    char defaultOpen = (env_value != NULL) ? '1' : '0';
+    // If this plugin was the one open at Aura shutdown, re-open it
+    TVReadUserString( iFilter, iFilter->PIName, "Open", tmp, &defaultOpen, 255 );
+    if( atoi( tmp ) )
+    {
+        PI_Parameters( iFilter, NULL ); // NULL as iArg means "open the requester"
+    }
     if (env_value != NULL) {
-        defaultOpen = '1';
-        DWORD req = TVOpenFilterReqEx(
-            iFilter, 150, 80, NULL, NULL, PIRF_HIDDEN_REQ, FILTERREQ_NO_TBAR
+        DWORD req = TVOpenReq(
+            iFilter, 150, 80, 0, 0, PIRF_HIDDEN_REQ, "AYONticker"
         );
 
         TVGrabTicks(iFilter, req, PITICKS_FLAG_ON);
         communication = new Communicator(env_value);
         communication->connect();
         register_callbacks();
-    }
-
-    char  tmp[256];
-
-    strcpy( iFilter->PIName, plugin_label.c_str() );
-    iFilter->PIVersion = 1;
-    iFilter->PIRevision = 0;
-
-    // If this plugin was the one open at Aura shutdown, re-open it
-    TVReadUserString( iFilter, iFilter->PIName, "Open", tmp, &defaultOpen, 255 );
-    if( atoi( tmp ) )
-    {
-        PI_Parameters( iFilter, NULL ); // NULL as iArg means "open the requester"
     }
     return  1; // OK
 }
