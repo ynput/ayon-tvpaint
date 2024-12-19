@@ -302,7 +302,7 @@ class TVPaintCommands:
 
     Args:
         workfile(str): Path to workfile.
-        job_queue_module(JobQueueModule): Object of OpenPype module JobQueue.
+        job_queue_module(JobQueueModule): Object of AYON module JobQueue.
     """
     def __init__(self, workfile, job_queue_module=None):
         self._log = None
