@@ -49,7 +49,6 @@ static struct {
     true,
     0,
     nullptr,
-    nullptr,
     1,
     false,
     nlohmann::json::object(),
