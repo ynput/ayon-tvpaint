@@ -715,14 +715,9 @@ class BaseCommunicator:
         self.websocket_server = WebSocketServer()
 
         self._create_routes()
-
-        os.environ["WEBSOCKET_URL"] = "ws://localhost:{}".format(
-            self.websocket_server.port
-        )
-
-        log.info("Added request handler for url: {}".format(
-            os.environ["WEBSOCKET_URL"]
-        ))
+        server_url = f"ws://localhost:{self.websocket_server.port}"
+        os.environ["AYON_RPC_URL"] = server_url
+        log.info(f"Added request handler for url: {server_url}")
 
         self._start_webserver()
 
