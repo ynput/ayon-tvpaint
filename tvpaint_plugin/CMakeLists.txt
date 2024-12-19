@@ -33,6 +33,13 @@ option(JSONRPCPP_INCLUDE "Jsonrpcpp include path" "")
 # Use static boost libraries
 set(Boost_USE_STATIC_LIBS ON)
 
+if(POLICY CMP0144)
+    cmake_policy(SET CMP0144 OLD)
+endif()
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 OLD)
+endif()
+
 find_package(Boost COMPONENTS random chrono date_time regex REQUIRED)
 
 include_directories(
