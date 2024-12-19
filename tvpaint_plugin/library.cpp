@@ -21,24 +21,19 @@
 #include "json.hpp"
 #include "jsonrpcpp.hpp"
 
-
-// All functions not exported should be static.
-// All global variables should be static.
-
-std::string to_utf8(std::string codepage_str) {
+std::string to_utf8(const std::string &codepage_str) {
 #if _WIN32 || _WIN64
-    int size = MultiByteToWideChar(CP_ACP, MB_COMPOSITE, codepage_str.c_str(),
-                                   codepage_str.length(), nullptr, 0);
+    int size = MultiByteToWideChar(
+        CP_ACP, MB_COMPOSITE, codepage_str.c_str(), codepage_str.length(), nullptr, 0);
     std::wstring utf16_str(size, '\0');
-    MultiByteToWideChar(CP_ACP, MB_COMPOSITE, codepage_str.c_str(),
-                        codepage_str.length(), &utf16_str[0], size);
+    MultiByteToWideChar(
+        CP_ACP, MB_COMPOSITE, codepage_str.c_str(), codepage_str.length(), &utf16_str[0], size);
 
-    int utf8_size =
-        WideCharToMultiByte(CP_UTF8, 0, utf16_str.c_str(), utf16_str.length(),
-                            nullptr, 0, nullptr, nullptr);
+    int utf8_size = WideCharToMultiByte(
+       CP_UTF8, 0, utf16_str.c_str(), utf16_str.length(), nullptr, 0, nullptr, nullptr);
     std::string utf8_str(utf8_size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, utf16_str.c_str(), utf16_str.length(),
-                        &utf8_str[0], utf8_size, nullptr, nullptr);
+    WideCharToMultiByte(
+        CP_UTF8, 0, utf16_str.c_str(), utf16_str.length(), &utf8_str[0], utf8_size, nullptr, nullptr);
     return utf8_str;
 #else
     return codepage_str;
