@@ -451,20 +451,16 @@ jsonrpcpp::response_ptr define_menu(const jsonrpcpp::Id &id, const jsonrpcpp::Pa
 }
 
 jsonrpcpp::response_ptr execute_george(const jsonrpcpp::Id &id, const jsonrpcpp::Parameter &params) {
-    const char *george_script;
     char cmd_output[2048];
-    char empty_char = {0};
-    std::string std_george_script;
-    std::string output;
 
     nlohmann::json json_params = params.to_json();
-    std_george_script = json_params[0];
+    std::string std_george_script = json_params[0];
 
     // Result of `TVSendCmd` is int with length of output string
     int executionStatus = TVSendCmd(Data.current_filter, std_george_script.c_str(), cmd_output);
     // TODO handle error
 
-    return std::make_shared<jsonrpcpp::Response>(id, to_utf8(output));
+    return std::make_shared<jsonrpcpp::Response>(id, to_utf8(cmd_output));
 }
 
 void register_callbacks(){
