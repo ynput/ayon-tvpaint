@@ -536,6 +536,12 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
         DWORD req = TVOpenReq(
             iFilter, 150, 80, 0, 0, PIRF_HIDDEN_REQ, "AYONticker"
         );
+        if(req == 0) {
+            TVWarning( iFilter, TXT_REQUESTER_ERROR );
+        } else if (req == Data.mReq) {
+            TVWarning(iFilter, "Tick requester has same id as menu requester");
+        }
+        Data.tickReq = req;
 
         TVGrabTicks(iFilter, req, PITICKS_FLAG_ON);
         communication = new Communicator(env_value);
@@ -657,7 +663,7 @@ int FAR PASCAL PI_Parameters( PIFilter* iFilter, char* iArg )
         {
             // Create empty requester because menu items are defined with
             //  `define_menu` callback
-            DWORD  req = TVOpenFilterReqEx(
+            DWORD req = TVOpenFilterReqEx(
                     iFilter,
                     185,
                     20,
@@ -666,10 +672,12 @@ int FAR PASCAL PI_Parameters( PIFilter* iFilter, char* iArg )
                     PIRF_STANDARD_REQ | PIRF_COLLAPSABLE_REQ,
                     FILTERREQ_NO_TBAR
             );
-            if( req == 0 )
-            {
-                TVWarning( iFilter, TXT_REQUESTER_ERROR );
+            if (req == 0) {
+                TVWarning(iFilter, TXT_REQUESTER_ERROR);
                 return  0;
+            }
+            if (req == Data.tickReq) {
+                TVWarning(iFilter, "Menu requester has same id as tick requester");
             }
 
             Data.mReq = req;
