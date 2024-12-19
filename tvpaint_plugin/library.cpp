@@ -42,6 +42,7 @@ std::string to_utf8(const std::string &codepage_str) {
 
 // mReq Identification of the requester.  (=0 closed, !=0 requester ID)
 static struct {
+    bool inOpen;
     DWORD mReq;
     DWORD tickReq;
     PIFilter *current_filter;
@@ -61,6 +62,7 @@ static struct {
     std::map<int, jsonrpcpp::Response> responses;
 
 } Data = {
+    true,
     0,
     0,
     nullptr,
@@ -537,6 +539,7 @@ int FAR PASCAL PI_Open(PIFilter* iFilter)
         communication->connect();
         register_callbacks();
     }
+    Data.inOpen = false;
     return 1;
 }
 
@@ -655,13 +658,13 @@ int FAR PASCAL PI_Parameters(PIFilter* iFilter, char* iArg)
     // Create empty requester because menu items are defined with
     //  `define_menu` callback
     DWORD req = TVOpenFilterReqEx(
-            iFilter,
-            185,
-            20,
-            NULL,
-            NULL,
-            PIRF_STANDARD_REQ | PIRF_COLLAPSABLE_REQ,
-            FILTERREQ_NO_TBAR
+        iFilter,
+        185,
+        20,
+        NULL,
+        NULL,
+        PIRF_STANDARD_REQ | PIRF_COLLAPSABLE_REQ,
+        FILTERREQ_NO_TBAR
    );
     if (req == 0) {
         TVWarning(iFilter, TXT_REQUESTER_ERROR);
@@ -676,12 +679,11 @@ int FAR PASCAL PI_Parameters(PIFilter* iFilter, char* iArg)
 
     // Sets the title of the requester.
     TVSetReqTitle(iFilter, Data.mReq, TXT_REQUESTER);
-
-    if (Data.newMenuItems) {
+    if (!Data.inOpen) {
         newMenuItemsProcess(iFilter);
     }
 
-    return  1;
+    return 1;
 }
 
 /**************************************************************************************/
