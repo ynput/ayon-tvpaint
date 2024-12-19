@@ -44,6 +44,7 @@ std::string to_utf8(const std::string &codepage_str) {
 static struct {
     bool firstParams;
     DWORD mReq;
+    DWORD tickReq;
     PIFilter *current_filter;
     // Id counter for client requests
     int client_request_id;
@@ -516,6 +517,21 @@ void FAR PASCAL PI_About( PIFilter* iFilter )
 int FAR PASCAL PI_Open( PIFilter* iFilter )
 {
     Data.current_filter = iFilter;
+
+    char defaultOpen = '0';
+    char *env_value = std::getenv("AYON_RPC_URL");
+    if (env_value != NULL) {
+        defaultOpen = '1';
+        DWORD req = TVOpenFilterReqEx(
+            iFilter, 150, 80, NULL, NULL, PIRF_HIDDEN_REQ, FILTERREQ_NO_TBAR
+        );
+
+        TVGrabTicks(iFilter, req, PITICKS_FLAG_ON);
+        communication = new Communicator(env_value);
+        communication->connect();
+        register_callbacks();
+    }
+
     char  tmp[256];
 
     strcpy( iFilter->PIName, plugin_label.c_str() );
@@ -523,16 +539,10 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
     iFilter->PIRevision = 0;
 
     // If this plugin was the one open at Aura shutdown, re-open it
-    TVReadUserString( iFilter, iFilter->PIName, "Open", tmp, "0", 255 );
+    TVReadUserString( iFilter, iFilter->PIName, "Open", tmp, &defaultOpen, 255 );
     if( atoi( tmp ) )
     {
         PI_Parameters( iFilter, NULL ); // NULL as iArg means "open the requester"
-    }
-    char *env_value = std::getenv("AYON_RPC_URL");
-    if (env_value != NULL) {
-        communication = new Communicator(env_value);
-        communication->connect();
-        register_callbacks();
     }
     return  1; // OK
 }
@@ -543,9 +553,11 @@ int FAR PASCAL PI_Open( PIFilter* iFilter )
 
 void FAR PASCAL PI_Close( PIFilter* iFilter )
 {
-    if( Data.mReq )
-    {
-        TVCloseReq( iFilter, Data.mReq );
+    if (Data.mReq) {
+        TVCloseReq(iFilter, Data.mReq);
+    }
+    if (Data.tickReq) {
+        TVCloseReq(iFilter, Data.tickReq);
     }
     if (communication != nullptr) {
         communication->endpoint.close_connection();
@@ -670,8 +682,6 @@ int FAR PASCAL PI_Parameters( PIFilter* iFilter, char* iArg )
 
             // Sets the title of the requester.
             TVSetReqTitle( iFilter, Data.mReq, TXT_REQUESTER );
-            // Request to listen to ticks
-            TVGrabTicks(iFilter, req, PITICKS_FLAG_ON);
 
             if ( Data.firstParams == true ) {
                 Data.firstParams = false;
@@ -702,8 +712,7 @@ int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iA
         // The user just 'clicked' on a normal button
         case PICBREQ_BUTTON_UP:
             button_up_item_id_str = std::to_string(iArgs[0]);
-            if (Data.menuItemsById.contains(button_up_item_id_str))
-            {
+            if (Data.menuItemsById.contains(button_up_item_id_str)) {
                 std::string callback_name = Data.menuItemsById[button_up_item_id_str].get<std::string>();
                 communication->call_method(callback_name, nlohmann::json::array());
             }
@@ -713,29 +722,33 @@ int FAR PASCAL PI_Msg( PIFilter* iFilter, INTPTR iEvent, INTPTR iReq, INTPTR* iA
             // The requester was just closed.
         case PICBREQ_CLOSE:
             // requester doesn't exists anymore
-            Data.mReq = 0;
+            if (Data.mReq == iReq) {
+                Data.mReq = 0;
 
-            char  tmp[256];
-            // Save the requester state (opened or closed)
-            // iArgs[4] contains a flag which tells us if the requester
-            // has been closed by the user (flag=0) or by Aura's shutdown (flag=1).
-            // If it was by Aura's shutdown, that means this requester was the
-            // last one open, so we should reopen this one the next time Aura
-            // is started.  Else we won't open it next time.
-            sprintf( tmp, "%d", (int)(iArgs[4]) );
+                char  tmp[256];
+                // Save the requester state (opened or closed)
+                // iArgs[4] contains a flag which tells us if the requester
+                // has been closed by the user (flag=0) or by Aura's shutdown (flag=1).
+                // If it was by Aura's shutdown, that means this requester was the
+                // last one open, so we should reopen this one the next time Aura
+                // is started.  Else we won't open it next time.
+                sprintf( tmp, "%d", (int)(iArgs[4]) );
 
-            // Save it in Aura's init file.
-            TVWriteUserString( iFilter, iFilter->PIName, "Open", tmp );
+                // Save it in Aura's init file.
+                TVWriteUserString( iFilter, iFilter->PIName, "Open", tmp );
+            } else if (Data.tickReq == iReq) {
+                Data.tickReq = 0;
+            }
             break;
 
         case PICBREQ_TICKS:
-            if (Data.newMenuItems)
-            {
+            if (Data.newMenuItems) {
                 newMenuItemsProcess(iFilter);
             }
             if (communication != nullptr) {
                 communication->process_requests();
             }
+            break;
     }
 
     return  1;
