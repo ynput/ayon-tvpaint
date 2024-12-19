@@ -64,6 +64,7 @@ static struct {
 } Data = {
     true,
     0,
+    0,
     nullptr,
     1,
     false,
