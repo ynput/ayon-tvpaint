@@ -25,6 +25,26 @@
 // All functions not exported should be static.
 // All global variables should be static.
 
+std::string to_utf8(std::string codepage_str) {
+#if _WIN32 || _WIN64
+    int size = MultiByteToWideChar(CP_ACP, MB_COMPOSITE, codepage_str.c_str(),
+                                   codepage_str.length(), nullptr, 0);
+    std::wstring utf16_str(size, '\0');
+    MultiByteToWideChar(CP_ACP, MB_COMPOSITE, codepage_str.c_str(),
+                        codepage_str.length(), &utf16_str[0], size);
+
+    int utf8_size =
+        WideCharToMultiByte(CP_UTF8, 0, utf16_str.c_str(), utf16_str.length(),
+                            nullptr, 0, nullptr, nullptr);
+    std::string utf8_str(utf8_size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, utf16_str.c_str(), utf16_str.length(),
+                        &utf8_str[0], utf8_size, nullptr, nullptr);
+    return utf8_str;
+#else
+    return codepage_str;
+#endif
+}
+
 // mReq Identification of the requester.  (=0 closed, !=0 requester ID)
 static struct {
     bool firstParams;
@@ -432,26 +452,19 @@ jsonrpcpp::response_ptr define_menu(const jsonrpcpp::Id &id, const jsonrpcpp::Pa
 
 jsonrpcpp::response_ptr execute_george(const jsonrpcpp::Id &id, const jsonrpcpp::Parameter &params) {
     const char *george_script;
-    char cmd_output[1024] = {0};
+    char cmd_output[2048];
     char empty_char = {0};
     std::string std_george_script;
     std::string output;
 
     nlohmann::json json_params = params.to_json();
     std_george_script = json_params[0];
-    george_script = std_george_script.c_str();
 
     // Result of `TVSendCmd` is int with length of output string
-    TVSendCmd(Data.current_filter, george_script, cmd_output);
+    int executionStatus = TVSendCmd(Data.current_filter, std_george_script.c_str(), cmd_output);
+    // TODO handle error
 
-    for (int i = 0; i < sizeof(cmd_output); i++)
-    {
-        if (cmd_output[i] == empty_char){
-            break;
-        }
-        output += cmd_output[i];
-    }
-    return std::make_shared<jsonrpcpp::Response>(id, output);
+    return std::make_shared<jsonrpcpp::Response>(id, to_utf8(output));
 }
 
 void register_callbacks(){
