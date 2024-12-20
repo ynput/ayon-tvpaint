@@ -12,7 +12,7 @@ class CustomBuilderTemplate(BaseSettingsModel):
         title="Task types",
         enum_resolver=task_types_enum
     )
-    template_path: MultiplatformPathModel = SettingsField(
+    path: MultiplatformPathModel = SettingsField(
         default_factory=MultiplatformPathModel
     )
 
