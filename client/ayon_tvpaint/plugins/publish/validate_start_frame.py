@@ -3,7 +3,7 @@ from ayon_core.pipeline import (
     PublishXmlValidationError,
     OptionalPyblishPluginMixin,
 )
-from ayon_tvpaint.api.lib import execute_george
+from ayon_tvpaint.api.lib import tv_get_start_frame, tv_set_start_frame
 
 
 class RepairStartFrame(pyblish.api.Action):
@@ -14,7 +14,7 @@ class RepairStartFrame(pyblish.api.Action):
     on = "failed"
 
     def process(self, context, plugin):
-        execute_george("tv_startframe 0")
+        tv_set_start_frame(0)
 
 
 class ValidateStartFrame(
@@ -35,7 +35,7 @@ class ValidateStartFrame(
         if not self.is_active(context.data):
             return
 
-        start_frame = execute_george("tv_startframe")
+        start_frame = tv_get_start_frame()
         if start_frame == 0:
             return
 

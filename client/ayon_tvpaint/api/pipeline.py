@@ -20,8 +20,14 @@ from ayon_core.pipeline import (
 from ayon_core.pipeline.context_tools import get_global_context
 
 from .lib import (
-    execute_george,
-    execute_george_through_file
+    execute_george_through_file,
+    tv_getprojectname,
+    tv_projectsave,
+    tv_loadproject,
+    tv_resize_page,
+    tv_set_mark_in,
+    tv_set_mark_out,
+    tv_set_frame_rate,
 )
 
 log = logging.getLogger(__name__)
@@ -141,10 +147,10 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
 
     # --- Workfile ---
     def open_workfile(self, filepath):
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(
-            filepath.replace("\\", "/")
-        )
-        return execute_george_through_file(george_script)
+        if tv_loadproject(filepath) is None:
+            return False
+
+        return filepath
 
     def save_workfile(self, filepath=None):
         if not filepath:
@@ -153,18 +159,16 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         save_current_workfile_context(context)
 
         # Execute george script to save workfile.
-        george_script = "tv_SaveProject {}".format(filepath.replace("\\", "/"))
-        return execute_george(george_script)
+        filepath = filepath.replace("\\", "/")
+        tv_projectsave(filepath)
+        return filepath
 
     def work_root(self, session):
         return session["AYON_WORKDIR"]
 
     def get_current_workfile(self):
         # TVPaint returns a '\' character when no scene is currently opened
-        current_workfile = execute_george("tv_GetProjectName")
-        if current_workfile == '\\':
-            return None
-        return current_workfile
+        return tv_getprojectname()
 
     def workfile_has_unsaved_changes(self):
         return None
@@ -503,16 +507,12 @@ def set_context_settings(project_name, task_entity):
     if width is None or height is None:
         print("Resolution was not found!")
     else:
-        execute_george(
-            "tv_resizepage {} {} 0".format(width, height)
-        )
+        tv_resize_page(width, height, "empty")
 
     framerate = task_attributes.get("fps")
 
     if framerate is not None:
-        execute_george(
-            "tv_framerate {} \"timestretch\"".format(framerate)
-        )
+        tv_set_frame_rate(framerate)
     else:
         print("Framerate was not found!")
 
@@ -530,5 +530,5 @@ def set_context_settings(project_name, task_entity):
     mark_in = 0
     mark_out = mark_in + (frame_end - frame_start) + handle_start + handle_end
 
-    execute_george("tv_markin {} set".format(mark_in))
-    execute_george("tv_markout {} set".format(mark_out))
+    tv_set_mark_in(mark_in)
+    tv_set_mark_out(mark_out)

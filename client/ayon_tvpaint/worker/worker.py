@@ -5,9 +5,13 @@ import tempfile
 import shutil
 import asyncio
 
+from ayon_tvpaint.api.lib import (
+    tv_loadproject,
+    tv_projectclose,
+)
 from ayon_tvpaint.api.communication_server import (
     BaseCommunicator,
-    CommunicationWrapper
+    CommunicationWrapper,
 )
 from ayon_jobqueue.job_workers import WorkerJobsConnection
 
@@ -53,9 +57,8 @@ class TVPaintWorkerCommunicator(BaseCommunicator):
             tmp_filepath = tmp_file.name.replace("\\", "/")
 
         shutil.copy(init_filepath, tmp_filepath)
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(tmp_filepath)
-        self.execute_george_through_file(george_script)
-        self.execute_george("tv_projectclose")
+        project_id = tv_loadproject(tmp_filepath, self)
+        tv_projectclose(project_id, self)
         os.remove(tmp_filepath)
 
     def _on_client_connect(self, *args, **kwargs):

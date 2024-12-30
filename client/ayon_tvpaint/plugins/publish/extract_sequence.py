@@ -1,5 +1,4 @@
 import os
-import copy
 import tempfile
 
 from PIL import Image
@@ -11,10 +10,12 @@ from ayon_core.pipeline.publish import (
     get_publish_instance_families,
 )
 from ayon_tvpaint.api.lib import (
-    execute_george,
     execute_george_through_file,
     get_layers_pre_post_behavior,
     get_layers_exposure_frames,
+    tv_set_start_frame,
+    tv_set_background_color,
+    tv_set_save_mode,
 )
 from ayon_tvpaint.lib import (
     calculate_layers_extraction_data,
@@ -77,7 +78,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         #     different way when Start Frame is not `0`
         # NOTE It will be set back after rendering
         scene_start_frame = instance.context.data["sceneStartFrame"]
-        execute_george("tv_startframe 0")
+        tv_set_start_frame(0)
 
         # Frame start/end may be stored as float
         frame_start = int(instance.data["frameStart"])
@@ -131,7 +132,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         output_filepaths_by_frame_idx, thumbnail_fullpath = result
 
         # Change scene frame Start back to previous value
-        execute_george("tv_startframe {}".format(scene_start_frame))
+        tv_set_start_frame(scene_start_frame)
 
         # Sequence of one frame
         if not output_filepaths_by_frame_idx:
@@ -233,10 +234,10 @@ class ExtractSequence(pyblish.api.InstancePlugin):
 
         bg_color = self._get_review_bg_color()
 
+        tv_set_background_color("color", *bg_color)
+        tv_set_save_mode("PNG")
+        tv_save_sequence(first_frame_filepath, mark_in, mark_out)
         george_script_lines = [
-            # Change bg color to color from settings
-            "tv_background \"color\" {} {} {}".format(*bg_color),
-            "tv_SaveMode \"PNG\"",
             "export_path = \"{}\"".format(
                 first_frame_filepath.replace("\\", "/")
             ),
@@ -244,19 +245,10 @@ class ExtractSequence(pyblish.api.InstancePlugin):
                 mark_in, mark_out
             )
         ]
+        execute_george_through_file("\n".join(george_script_lines))
         if scene_bg_color:
             # Change bg color back to previous scene bg color
-            _scene_bg_color = copy.deepcopy(scene_bg_color)
-            bg_type = _scene_bg_color.pop(0)
-            orig_color_command = [
-                "tv_background",
-                "\"{}\"".format(bg_type)
-            ]
-            orig_color_command.extend(_scene_bg_color)
-
-            george_script_lines.append(" ".join(orig_color_command))
-
-        execute_george_through_file("\n".join(george_script_lines))
+            tv_set_background_color(*scene_bg_color)
 
         first_frame_filepath = None
         output_filepaths_by_frame_idx = {}

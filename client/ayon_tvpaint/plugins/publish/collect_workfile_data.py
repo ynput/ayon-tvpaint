@@ -1,12 +1,16 @@
 import os
 import json
-import tempfile
 
 import pyblish.api
 
 from ayon_tvpaint.api.lib import (
-    execute_george,
-    execute_george_through_file,
+    tv_projectselect,
+    tv_projectcurrentid,
+    tv_get_mark_in,
+    tv_get_mark_out,
+    tv_get_background_color,
+    tv_get_start_frame,
+    tv_get_project_info,
     get_layers_data,
     get_groups_data,
 )
@@ -61,8 +65,8 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
     settings_category = "tvpaint"
 
     def process(self, context):
-        current_project_id = execute_george("tv_projectcurrentid")
-        execute_george("tv_projectselect {}".format(current_project_id))
+        current_project_id = tv_projectcurrentid()
+        tv_projectselect(current_project_id)
 
         # Collect and store current context to have reference
         current_context = {
@@ -148,74 +152,26 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
         )
 
         self.log.info("Collecting scene data from workfile")
-        workfile_info_parts = execute_george("tv_projectinfo").split(" ")
-
-        # Project frame start - not used
-        workfile_info_parts.pop(-1)
-        field_order = workfile_info_parts.pop(-1)
-        frame_rate = float(workfile_info_parts.pop(-1))
-        pixel_apsect = float(workfile_info_parts.pop(-1))
-        height = int(workfile_info_parts.pop(-1))
-        width = int(workfile_info_parts.pop(-1))
-        workfile_path = " ".join(workfile_info_parts).replace("\"", "")
-
-        # Marks return as "{frame - 1} {state} ", example "0 set".
-        result = execute_george("tv_markin")
-        mark_in_frame, mark_in_state, _ = result.split(" ")
-
-        result = execute_george("tv_markout")
-        mark_out_frame, mark_out_state, _ = result.split(" ")
+        workfile_info = tv_get_project_info()
+        mark_in_frame, mark_in_state = tv_get_mark_in()
+        mark_out_frame, mark_out_state = tv_get_mark_out()
+        start_frame = tv_get_start_frame()
 
         scene_data = {
-            "currentFile": workfile_path,
-            "sceneWidth": width,
-            "sceneHeight": height,
-            "scenePixelAspect": pixel_apsect,
-            "sceneFps": frame_rate,
-            "sceneFieldOrder": field_order,
-            "sceneMarkIn": int(mark_in_frame),
+            "currentFile": workfile_info.path,
+            "sceneWidth": workfile_info.width,
+            "sceneHeight": workfile_info.height,
+            "scenePixelAspect": workfile_info.pixel_apsect,
+            "sceneFps": workfile_info.frame_rate,
+            "sceneFieldOrder": workfile_info.field_order,
+            "sceneMarkIn": mark_in_frame,
             "sceneMarkInState": mark_in_state == "set",
-            "sceneMarkOut": int(mark_out_frame),
+            "sceneMarkOut": mark_out_frame,
             "sceneMarkOutState": mark_out_state == "set",
-            "sceneStartFrame": int(execute_george("tv_startframe")),
-            "sceneBgColor": self._get_bg_color()
+            "sceneStartFrame": start_frame,
+            "sceneBgColor": tv_get_background_color(),
         }
         self.log.debug(
             "Scene data: {}".format(json.dumps(scene_data, indent=4))
         )
         context.data.update(scene_data)
-
-    def _get_bg_color(self):
-        """Background color set on scene.
-
-        Is important for review exporting where scene bg color is used as
-        background.
-        """
-        output_file = tempfile.NamedTemporaryFile(
-            mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-        )
-        output_file.close()
-        output_filepath = output_file.name.replace("\\", "/")
-        george_script_lines = [
-            # Variable containing full path to output file
-            "output_path = \"{}\"".format(output_filepath),
-            "tv_background",
-            "bg_color = result",
-            # Write data to output file
-            (
-                "tv_writetextfile"
-                " \"strict\" \"append\" '\"'output_path'\"' bg_color"
-            )
-        ]
-
-        george_script = "\n".join(george_script_lines)
-        execute_george_through_file(george_script)
-
-        with open(output_filepath, "r") as stream:
-            data = stream.read()
-
-        os.remove(output_filepath)
-        data = data.strip()
-        if not data:
-            return None
-        return data.split(" ")

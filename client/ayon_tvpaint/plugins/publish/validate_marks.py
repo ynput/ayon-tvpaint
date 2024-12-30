@@ -5,7 +5,7 @@ from ayon_core.pipeline import (
     PublishXmlValidationError,
     OptionalPyblishPluginMixin,
 )
-from ayon_tvpaint.api.lib import execute_george
+from ayon_tvpaint.api.lib import tv_set_mark_in, tv_set_mark_out
 
 
 class ValidateMarksRepair(pyblish.api.Action):
@@ -17,13 +17,8 @@ class ValidateMarksRepair(pyblish.api.Action):
 
     def process(self, context, plugin):
         expected_data = ValidateMarks.get_expected_data(context)
-
-        execute_george(
-            "tv_markin {} set".format(expected_data["markIn"])
-        )
-        execute_george(
-            "tv_markout {} set".format(expected_data["markOut"])
-        )
+        tv_set_mark_in(expected_data["markIn"])
+        tv_set_mark_out(expected_data["markOut"])
 
 
 class ValidateMarks(

@@ -5,9 +5,7 @@ import copy
 import json
 import time
 from uuid import uuid4
-from abc import ABCMeta, abstractmethod, abstractproperty
-
-import six
+from abc import ABC, abstractmethod
 
 from ayon_core.lib import Logger
 from ayon_core.addons import AddonsManger
@@ -31,8 +29,7 @@ class JobFailed(Exception):
         super().__init__(error_msg)
 
 
-@six.add_metaclass(ABCMeta)
-class BaseCommand:
+class BaseCommand(ABC):
     """Abstract TVPaint command which can be executed through worker.
 
     Each command must have unique name and implemented 'execute' and
@@ -44,7 +41,8 @@ class BaseCommand:
     through server to a worker where is replicated one by one, executed and
     result sent back to sender through server.
     """
-    @abstractproperty
+    @property
+    @abstractmethod
     def name(self):
         """Command name (must be unique)."""
         pass
@@ -290,8 +288,7 @@ class CollectSceneData(BaseCommand):
         return cls(data)
 
 
-@six.add_metaclass(ABCMeta)
-class TVPaintCommands:
+class TVPaintCommands(ABC):
     """Wrapper around TVPaint commands to be able send multiple commands.
 
     Commands may send one or multiple commands at once. Also gives api access
@@ -514,14 +511,13 @@ class ProcessTVPaintCommands(TVPaintCommands):
     def _open_workfile(self):
         """Open workfile in TVPaint."""
         workfile = self._workfile
-        print("Opening workfile {}".format(workfile))
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(workfile)
-        self.execute_george_through_file(george_script)
+        print(f"Opening workfile {workfile}")
+        self._communicator.tv_loadproject(workfile)
 
     def _close_workfile(self):
         """Close workfile in TVPaint."""
         print("Closing workfile")
-        self.execute_george_through_file("tv_projectclose")
+        self._communicator.tv_projectclose()
 
     def execute(self):
         """Execute commands."""
