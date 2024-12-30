@@ -1,8 +1,16 @@
 import os
 import logging
 import tempfile
+from typing import Optional, Tuple, Literal
 
-from .communication_server import CommunicationWrapper
+from .communication_server import (
+    CommunicationWrapper,
+    ProjectInfo,
+    SaveFormat,
+    AVIMode,
+    ImagePalette,
+    ImageDithering,
+)
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +37,157 @@ def execute_george_through_file(george_script, communicator=None):
         communicator = CommunicationWrapper.communicator
 
     return communicator.execute_george_through_file(george_script)
+
+
+def execute_george_command(command, *args):
+    """Execute George command with arguments.
+
+    Args:
+        command (str): George command to execute.
+        *args: Arguments for command.
+
+    """
+    return CommunicationWrapper.communicator.execute_george_command(
+        command, *args
+    )
+
+
+def tv_loadproject(filepath: str, silent: bool = False) -> str:
+    return CommunicationWrapper.communicator.tv_loadproject(filepath, silent)
+
+
+def tv_projectsave(filepath: str):
+    return CommunicationWrapper.communicator.tv_projectsave(filepath)
+
+
+def tv_projectclose(project_id: Optional[str] = None):
+    return CommunicationWrapper.communicator.tv_projectclose(project_id)
+
+
+def tv_resize_page(
+    width: int,
+    height: int,
+    conversion: Literal["empty", "crop", "stretch"] = "empty",
+):
+    return CommunicationWrapper.communicator.tv_resize_page(
+        width, height, conversion
+    )
+
+
+def tv_set_save_mode(
+    save_format: SaveFormat,
+    jpeg_power: Optional[int] = None,
+    avi_mode: Optional[AVIMode] = None,
+    avi_compression: Optional[int] = None,
+    compress_tga: Optional[bool] = None,
+    palette: Optional[ImagePalette] = None,
+    dithering: Optional[ImageDithering] = None,
+    number_of_colors: Optional[int] = None,
+):
+    return CommunicationWrapper.communicator.tv_set_save_mode(
+        save_format,
+        jpeg_power,
+        avi_mode,
+        avi_compression,
+        compress_tga,
+        palette,
+        dithering,
+        number_of_colors,
+    )
+
+
+def tv_get_background_color() -> Tuple[
+    Literal["color", "check", "none"],
+    Optional[Tuple[int, int, int]],
+    Optional[Tuple[int, int, int]]
+]:
+    return CommunicationWrapper.communicator.tv_get_background_color()
+
+
+def tv_set_background_color(
+    bg_type: Literal["color", "check"],
+    color_1: Optional[Tuple[int, int, int]],
+    color_2: Optional[Tuple[int, int, int]] = None,
+):
+    return CommunicationWrapper.communicator.tv_set_background(
+        bg_type, color_1, color_2
+    )
+
+
+def tv_save_sequence(
+    output_path: str,
+    mark_in: Optional[int] = None,
+    mark_out: Optional[int] = None,
+):
+    return CommunicationWrapper.communicator.tv_save_sequence(
+        output_path, mark_in, mark_out
+    )
+
+
+def tv_projectcurrentid() -> Optional[str]:
+    return CommunicationWrapper.communicator.tv_projectcurrentid()
+
+
+def tv_projectselect(project_id: str):
+    return CommunicationWrapper.communicator.tv_projectselect(project_id)
+
+
+def tv_getprojectname() -> Optional[str]:
+    return CommunicationWrapper.communicator.tv_getprojectname()
+
+
+def tv_get_project_info(
+    project_id: Optional[str] = None
+) -> Optional[ProjectInfo]:
+    return CommunicationWrapper.communicator.tv_get_project_info(project_id)
+
+
+def tv_get_mark_in(
+    reference: Literal["clip", "project"] = "clip"
+) -> Tuple[int, Literal["set", "clear"]]:
+    return CommunicationWrapper.communicator.tv_get_mark_in(reference)
+
+
+def tv_get_mark_out(
+    reference: Literal["clip", "project"] = "clip"
+) -> Tuple[int, Literal["set", "clear"]]:
+    return CommunicationWrapper.communicator.tv_get_mark_out(reference)
+
+
+def tv_set_mark_in(
+    frame: int,
+    state: Literal["set", "clear"] = "set",
+    reference: Literal["clip", "project"] = "clip",
+):
+    return CommunicationWrapper.communicator.tv_set_mark_in(
+        frame, state, reference
+    )
+
+
+def tv_set_mark_out(
+    frame: int,
+    state: Literal["set", "clear"] = "set",
+    reference: Literal["clip", "project"] = "clip",
+):
+    return CommunicationWrapper.communicator.tv_set_mark_out(
+        frame, state, reference
+    )
+
+
+def tv_get_start_frame() -> int:
+    return CommunicationWrapper.communicator.tv_get_start_frame()
+
+
+def tv_set_start_frame(frame: int) -> int:
+    return CommunicationWrapper.communicator.tv_set_start_frame(frame)
+
+
+def tv_set_frame_rate(
+    frame_rate: float, convert_project: bool = False
+) -> float:
+    return CommunicationWrapper.communicator.tv_set_frame_rate(
+        frame_rate, convert_project
+    )
 
 
 def parse_layers_data(data):
@@ -473,31 +632,19 @@ def get_scene_data(communicator=None):
     Returns:
         dict: Scene data collected in many ways.
     """
-    workfile_info = execute_george("tv_projectinfo", communicator)
-    workfile_info_parts = workfile_info.split(" ")
-
-    # Project frame start - not used
-    workfile_info_parts.pop(-1)
-    field_order = workfile_info_parts.pop(-1)
-    frame_rate = float(workfile_info_parts.pop(-1))
-    pixel_apsect = float(workfile_info_parts.pop(-1))
-    height = int(workfile_info_parts.pop(-1))
-    width = int(workfile_info_parts.pop(-1))
+    workfile_info = communicator.tv_get_project_info()
 
     # Marks return as "{frame - 1} {state} ", example "0 set".
-    result = execute_george("tv_markin", communicator)
-    mark_in_frame, mark_in_state, _ = result.split(" ")
+    mark_in_frame, mark_in_state = communicator.tv_get_mark_in()
+    mark_out_frame, mark_out_state = communicator.tv_get_mark_out()
+    start_frame = communicator.tv_get_start_frame()
 
-    result = execute_george("tv_markout", communicator)
-    mark_out_frame, mark_out_state, _ = result.split(" ")
-
-    start_frame = execute_george("tv_startframe", communicator)
     return {
-        "width": width,
-        "height": height,
-        "pixel_aspect": pixel_apsect,
-        "fps": frame_rate,
-        "field_order": field_order,
+        "width": workfile_info.width,
+        "height": workfile_info.height,
+        "pixel_aspect": workfile_info.pixel_apsect,
+        "fps": workfile_info.frame_rate,
+        "field_order": workfile_info.field_order,
         "mark_in": int(mark_in_frame),
         "mark_in_state": mark_in_state,
         "mark_in_set": mark_in_state == "set",

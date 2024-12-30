@@ -11,6 +11,8 @@ import filecmp
 import tempfile
 import threading
 import shutil
+from dataclasses import dataclass
+from typing import Optional, Tuple, Literal
 
 from contextlib import closing
 
@@ -24,8 +26,37 @@ from aiohttp_json_rpc.exceptions import RpcError
 from ayon_core.lib import emit_event
 from ayon_tvpaint.tvpaint_plugin import get_plugin_files_path
 
+from client.ayon_tvpaint.api.pipeline import list_instances
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
+
+SaveFormat = Literal[
+    "psd", "deep", "tiff", "rtv", "qt", "dps", "sun", "cin", "dpx", "vpb",
+    "jpeg",
+    "avi",
+    "tga",
+    "png", "bmp", "gif", "pcx", "flc", "ilbm",
+]
+
+AVIMode = Literal["rgb", "rgba", "mjpg", "yuv"]
+ImagePalette = Literal["b24", "b32", "global", "local", "fix", "user"]
+ImageDithering = Literal["dither", "nodither", "mat"]
+
+
+class GeorgeExecutionError(Exception):
+    pass
+
+
+@dataclass
+class ProjectInfo:
+    path: str
+    width: int
+    height: int
+    pixel_aspect: float
+    frame_rate: float
+    field_order: Literal["none", "lower", "upper"]
+    start_frame: int
 
 
 class CommunicationWrapper:
@@ -800,6 +831,19 @@ class BaseCommunicator:
             client, method, params
         )
 
+    def execute_george_command(self, command: str, *args):
+        """Execute passed goerge script in TVPaint."""
+        args = [command]
+        for arg in args:
+            if not isinstance(arg, str):
+                arg = str(arg)
+            if " " in arg:
+                arg = f'"{arg}"'
+            args.append(arg)
+        return self.send_request(
+            "execute_george", [" ".join(args)]
+        )
+
     def execute_george(self, george_script):
         """Execute passed goerge script in TVPaint."""
         return self.send_request(
@@ -826,6 +870,282 @@ class BaseCommunicator:
         temp_file_path = temporary_file.name.replace("\\", "/")
         self.execute_george("tv_runscript {}".format(temp_file_path))
         os.remove(temp_file_path)
+
+    def tv_projectcurrentid(self) -> Optional[str]:
+        return self.execute_george_command("tv_projectcurrentid") or None
+
+    def tv_getprojectname(self) -> Optional[str]:
+        result = (
+            self
+            .execute_george_command("tv_getprojectname")
+            .replace("\\", "/")
+            .rstrip("/")
+        )
+        if not result:
+            return None
+        return os.path.normpath(result)
+
+    def tv_projectselect(self, project_id: str):
+        self.execute_george_command("tv_projectselect", project_id)
+
+    def tv_loadproject(self, filepath: str, silent: bool = False) -> str:
+        result = self.execute_george_command(
+            "tv_loadproject",
+            filepath.replace("\\", "/"),
+            int(silent),
+        )
+        if result == "-1":
+            raise GeorgeExecutionError(
+                f"Failed to load project. Path '{filepath}' not found."
+            )
+
+        if result.lower().startswith("error"):
+            raise GeorgeExecutionError(f"Failed to load project. {result}.")
+        return result
+
+    def tv_projectsave(self, filepath: str):
+        result = self.execute_george_command("tv_SaveProject", filepath)
+        if result:
+            raise GeorgeExecutionError(
+                f"Failed to save project to '{filepath}'."
+            )
+
+    def tv_projectclose(self, project_id: Optional[str] = None):
+        args = []
+        if project_id:
+            args.append(project_id)
+        return self.execute_george_command("tv_projectclose", *args)
+
+    def tv_resize_page(
+        self,
+        width: int,
+        height: int,
+        conversion: Literal["empty", "crop", "stretch"] = "empty",
+    ):
+        """Resize project page."""
+        if conversion == "empty":
+            conversion_int = 0
+        elif conversion == "crop":
+            conversion_int = 1
+        elif conversion == "stretch":
+            conversion_int = 2
+        elif isinstance(conversion, int):
+            if conversion < 0 or conversion > 2:
+                raise ValueError(
+                    "Invalid conversion type."
+                    " Expected 0, 1, 2."
+                    f" Got'{conversion}'."
+                )
+            conversion_int = conversion
+        else:
+            raise ValueError(
+                "Invalid conversion type."
+                " Expected 'empty', 'crop', 'stretch'."
+                f" Got'{conversion}'."
+            )
+        result = self.execute_george_command(
+            "tv_resizepage", width, height, conversion_int
+        )
+        if result:
+            raise GeorgeExecutionError(f"Failed to resize project: {result}")
+
+    def tv_set_save_mode(
+        self,
+        save_format: SaveFormat,
+        jpeg_power: Optional[int] = None,
+        avi_mode: Optional[AVIMode] = None,
+        avi_compression: Optional[int] = None,
+        compress_tga: Optional[bool] = None,
+        palette: Optional[ImagePalette] = None,
+        dithering: Optional[ImageDithering] = None,
+        number_of_colors: Optional[int] = None,
+    ):
+        args = []
+        if save_format == "tga":
+            if compress_tga is not None:
+                args.append(int(compress_tga))
+        elif save_format == "jpeg":
+            if jpeg_power is not None:
+                args.append(jpeg_power)
+        elif save_format == "avi":
+            if avi_mode is not None:
+                args.append(avi_mode)
+            if avi_compression is not None:
+                args.append(avi_compression)
+        elif save_format in {"png", "bmp", "gif", "pcx", "flc", "ilbm"}:
+            if palette is not None:
+                args.append(palette)
+            if dithering is not None:
+                args.append(dithering)
+            if number_of_colors is not None:
+                args.append(number_of_colors)
+
+        result = self.execute_george_command(
+            "tv_savemode", save_format, *args
+        )
+        if result:
+            raise GeorgeExecutionError(f"Failed to set save mode: {result}")
+
+    def tv_get_background_color(self) -> Tuple[
+        Literal["color", "check", "none"],
+        Optional[Tuple[int, int, int]],
+        Optional[Tuple[int, int, int]]
+    ]:
+        result = self.execute_george_command("tv_background")
+        parts = result.split(" ")
+        bg_type = parts.pop(0)
+        color_1 = color_2 = None
+        if bg_type == "color":
+            color_1 = tuple(map(int, parts))
+        elif bg_type == "check":
+            color_1 = tuple(map(int, parts[:3]))
+            color_2 = tuple(map(int, parts[3:]))
+        return bg_type, color_1, color_2
+
+    def tv_set_background_color(
+        self,
+        bg_type: Literal["color", "check"],
+        color_1: Optional[Tuple[int, int, int]],
+        color_2: Optional[Tuple[int, int, int]] = None,
+    ):
+        args = []
+        if bg_type == "color":
+            args.append("color")
+            if color_1 is not None:
+                args.extend(color_1)
+        elif bg_type == "check":
+            args.append("check")
+            if color_1 is None or color_2 is None:
+                raise ValueError("Expected 2 colors for check type.")
+            args.extend(color_1)
+            args.extend(color_2)
+        result = self.execute_george_command(
+            "tv_background", *args
+        )
+        if not result:
+            raise GeorgeExecutionError(f"Failed to set background")
+
+    def tv_save_sequence(
+        self,
+        output_path: str,
+        mark_in: Optional[int] = None,
+        mark_out: Optional[int] = None,
+    ):
+        output_path = output_path.replace("\\", "/")
+        args = []
+        if mark_in is not None:
+            args.append(mark_in)
+            if mark_out is None:
+                raise ValueError("Mark out must be set when mark in is set.")
+            args.append(mark_out)
+        result = self.execute_george_command(
+            "tv_savesequence", output_path, *args
+        )
+        if result:
+            raise GeorgeExecutionError(f"Failed to save sequence: {result}")
+
+    def tv_get_mark_in(
+        self, reference: Literal["clip", "project"] = "clip"
+    ) -> Tuple[int, Literal["set", "clear"]]:
+        result = self.execute_george_command("tv_markin", reference)
+        frame, state = result.rstrip(" ").split(" ")
+        return int(frame), state
+
+    def tv_get_mark_out(
+        self, reference: Literal["clip", "project"] = "clip"
+    ) -> Tuple[int, Literal["set", "clear"]]:
+        result = self.execute_george_command("tv_markout", reference)
+        frame, state = result.rstrip(" ").split(" ")
+        return int(frame), state
+
+    def tv_set_mark_in(
+        self,
+        frame: int,
+        state: Literal["set", "clear"] = "set",
+        reference: Literal["clip", "project"] = "clip",
+    ):
+        # TODO find out if is possible to change state without changing frame
+        self.execute_george_command(
+            "tv_markin", reference, frame, state
+        )
+
+    def tv_set_mark_out(
+        self,
+        frame: int,
+        state: Literal["set", "clear"] = "set",
+        reference: Literal["clip", "project"] = "clip",
+    ):
+        # TODO find out if is possible to change state without changing frame
+        self.execute_george_command(
+            "tv_markout", reference, frame, state
+        )
+
+    def tv_get_start_frame(self) -> int:
+        return int(self.execute_george_command("tv_startframe"))
+
+    def tv_set_start_frame(self, frame: int) -> int:
+        """
+
+        Returns:
+            int: Previous start frame.
+
+        """
+        return int(self.execute_george_command("tv_startframe", frame))
+
+    def tv_get_frame_rate(self):
+        result = self.execute_george_command(
+            "tv_framerate", 1, "info"
+        )
+        return float(result)
+
+    def tv_set_frame_rate(
+        self, frame_rate: float, convert_project: bool = False
+    ) -> float:
+        args = [frame_rate]
+        if convert_project:
+            args.append("timestretch")
+        previous_framerate = self.execute_george_command(
+            "tv_framerate", *args
+        )
+        return float(previous_framerate)
+
+    def tv_set_preview_frame_rate(self, frame_rate: float):
+        result = self.execute_george_command(
+            "tv_framerate", frame_rate, "preview"
+        )
+        frame_rate, target = result.split(" ")
+        return float(frame_rate)
+
+    def tv_get_project_info(
+        self, project_id: Optional[str] = None
+    ) -> Optional[ProjectInfo]:
+        args = []
+        if project_id:
+            args.append(project_id)
+        result = self.execute_george_command(
+            "tv_projectinfo", *args
+        )
+        if not result:
+            return None
+        workfile_info_parts = result.split(" ")
+
+        # Project frame start - not used
+        start_frame = int(workfile_info_parts.pop(-1))
+        field_order = workfile_info_parts.pop(-1)
+        frame_rate = float(workfile_info_parts.pop(-1))
+        pixel_apsect = float(workfile_info_parts.pop(-1))
+        height = int(workfile_info_parts.pop(-1))
+        width = int(workfile_info_parts.pop(-1))
+        path = " ".join(workfile_info_parts).replace("\"", "")
+        return ProjectInfo(
+            path,
+            width,
+            height,
+            pixel_apsect,
+            frame_rate,
+            field_order,
+            start_frame,
+        )
 
 
 class QtCommunicator(BaseCommunicator):
