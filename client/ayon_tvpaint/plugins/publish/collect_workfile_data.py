@@ -4,6 +4,7 @@ import tempfile
 
 import pyblish.api
 
+from ayon_core.pipeline import PublishError
 from ayon_tvpaint.api.lib import (
     execute_george,
     execute_george_through_file,
@@ -170,6 +171,11 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
         scene_index = 0
         while True:
             scene_id = execute_george(f"tv_sceneenumid {scene_index}")
+            if scene_id == "none":
+                raise PublishError(
+                    "Current scene was not found in workfile."
+                )
+
             if scene_id == current_scene_id:
                 break
             scene_index += 1
@@ -180,6 +186,11 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
             clip_id = execute_george(
                 f"tv_clipenumid {current_scene_id} {clip_index}"
             )
+            if clip_id == "none":
+                raise PublishError(
+                    "Current clip was not found in scene."
+                )
+
             if clip_id == current_clip_id:
                 break
             clip_index += 1
