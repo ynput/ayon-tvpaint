@@ -166,6 +166,24 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
         result = execute_george("tv_markout")
         mark_out_frame, mark_out_state, _ = result.split(" ")
 
+        current_scene_id = execute_george("tv_scenecurrentid")
+        scene_index = 0
+        while True:
+            scene_id = execute_george(f"tv_sceneenumid {scene_index}")
+            if scene_id == current_scene_id:
+                break
+            scene_index += 1
+
+        current_clip_id = execute_george("tv_clipcurrentid")
+        clip_index = 0
+        while True:
+            clip_id = execute_george(
+                f"tv_clipenumid {current_scene_id} {clip_index}"
+            )
+            if clip_id == current_clip_id:
+                break
+            clip_index += 1
+
         scene_data = {
             "currentFile": workfile_path,
             "sceneWidth": width,
@@ -178,7 +196,9 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
             "sceneMarkOut": int(mark_out_frame),
             "sceneMarkOutState": mark_out_state == "set",
             "sceneStartFrame": int(execute_george("tv_startframe")),
-            "sceneBgColor": self._get_bg_color()
+            "sceneBgColor": self._get_bg_color(),
+            "sceneSceneIdx": scene_index,
+            "sceneClipIdx": clip_index,
         }
         self.log.debug(
             "Scene data: {}".format(json.dumps(scene_data, indent=4))
