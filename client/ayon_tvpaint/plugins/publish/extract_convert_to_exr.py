@@ -33,6 +33,9 @@ class ExtractConvertToEXR(pyblish.api.InstancePlugin):
     exr_compression = "ZIP"
 
     def process(self, instance):
+        if instance.data.get("farm"):
+            return
+
         repres = instance.data.get("representations")
         if not repres:
             return
