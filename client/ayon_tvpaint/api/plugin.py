@@ -60,7 +60,8 @@ class TVPaintCreatorCommon:
         task_entity,
         variant,
         host_name=None,
-        instance=None
+        instance=None,
+        project_entity=None,
     ):
         dynamic_data = self.get_dynamic_data(
             project_name,
@@ -84,7 +85,8 @@ class TVPaintCreatorCommon:
             variant,
             dynamic_data=dynamic_data,
             project_settings=self.project_settings,
-            product_type_filter=self.product_template_product_type
+            product_type_filter=self.product_template_product_type,
+            project_entity=project_entity,
         )
 
 
