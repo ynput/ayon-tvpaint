@@ -37,6 +37,9 @@ class ExtractSequence(pyblish.api.InstancePlugin):
     review_bg = [255, 255, 255, 1.0]
 
     def process(self, instance):
+        if instance.data.get("farm"):
+            return
+
         self.log.info(
             "* Processing instance \"{}\"".format(instance.data["label"])
         )
@@ -380,7 +383,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             else:
                 self.log.info((
                     "Source for thumbnail has mode \"{}\" (Expected: RGBA)."
-                    " Can't use thubmanail background color."
+                    " Can't use thumbnail background color."
                 ).format(source_img.mode))
                 source_img.save(thumbnail_filepath)
 
