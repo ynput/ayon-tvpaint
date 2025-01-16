@@ -1,5 +1,7 @@
 import os
 
+import ayon_api
+
 from ayon_core.pipeline import (
     registered_host,
     get_current_context,
@@ -51,20 +53,29 @@ class LoadWorkfile(plugin.Loader):
         # Save workfile.
         host_name = "tvpaint"
         if "project_name" in work_context:
-            project_name = context["project_name"]
-            folder_path = context["folder_path"]
-            task_name = context["task_name"]
+            project_name = context["project"]["name"]
+            folder_path = context["folder"]["path"]
+            # Get task from version (is not part of representation context)
+            version_entity = context["version"]
+            task_id = version_entity.get("taskId")
+            task_name = None
+            if task_id:
+                task_entity = ayon_api.get_task_by_id(
+                    project_name, task_id, fields={"name"}
+                )
+                if task_entity:
+                    task_name = task_entity["name"]
         else:
-            project_name = work_context.get("project")
-            folder_path = work_context.get("asset")
-            task_name = work_context.get("task")
+            project_name = work_context.get("project_name")
+            folder_path = work_context.get("folder_path")
+            task_name = work_context.get("task_name")
 
         # Far cases when there is workfile without work_context
         if not folder_path:
-            context = get_current_context()
-            project_name = context["project_name"]
-            folder_path = context["folder_path"]
-            task_name = context["task_name"]
+            current_context = get_current_context()
+            project_name = current_context.get("project_name")
+            folder_path = current_context.get("folder_path")
+            task_name = current_context.get("task_name")
 
         template_key = get_workfile_template_key_from_context(
             project_name,
