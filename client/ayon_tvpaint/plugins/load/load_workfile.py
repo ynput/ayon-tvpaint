@@ -51,20 +51,20 @@ class LoadWorkfile(plugin.Loader):
         # Save workfile.
         host_name = "tvpaint"
         if "project_name" in work_context:
-            project_name = context["project_name"]
-            folder_path = context["folder_path"]
-            task_name = context["task_name"]
+            project_name = context["project"]["name"]
+            folder_path = context["folder"]["path"]
+            task_name = context["task"]["name"]
         else:
-            project_name = work_context.get("project")
-            folder_path = work_context.get("asset")
-            task_name = work_context.get("task")
+            project_name = work_context.get("project_name")
+            folder_path = work_context.get("folder_path")
+            task_name = work_context.get("task_name")
 
         # Far cases when there is workfile without work_context
         if not folder_path:
             context = get_current_context()
-            project_name = context["project_name"]
-            folder_path = context["folder_path"]
-            task_name = context["task_name"]
+            project_name = context["project"]["name"]
+            folder_path = context["folder"]["path"]
+            task_name = context["task"]["name"]
 
         template_key = get_workfile_template_key_from_context(
             project_name,
