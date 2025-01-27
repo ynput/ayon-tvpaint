@@ -15,7 +15,7 @@ from ayon_core.lib import register_event_callback
 from ayon_core.pipeline import (
     register_loader_plugin_path,
     register_creator_plugin_path,
-    AVALON_CONTAINER_ID,
+    AYON_CONTAINER_ID,
 )
 from ayon_core.pipeline.context_tools import get_global_context
 
@@ -244,8 +244,6 @@ def containerise(
     """
 
     container_data = {
-        "schema": "openpype:container-2.0",
-        "id": AVALON_CONTAINER_ID,
         "members": members,
         "name": name,
         "namespace": namespace,
@@ -474,6 +472,8 @@ def get_containers():
     output = get_workfile_metadata(SECTION_NAME_CONTAINERS)
     if output:
         for item in output:
+            item["schema"] = "ayon:container-3.0"
+            item["id"] = AYON_CONTAINER_ID
             if "objectName" not in item and "members" in item:
                 members = item["members"]
                 if isinstance(members, list):
