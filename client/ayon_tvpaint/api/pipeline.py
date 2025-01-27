@@ -244,8 +244,6 @@ def containerise(
     """
 
     container_data = {
-        "schema": "ayon:container-3.0",
-        "id": AYON_CONTAINER_ID,
         "members": members,
         "name": name,
         "namespace": namespace,
@@ -474,6 +472,8 @@ def get_containers():
     output = get_workfile_metadata(SECTION_NAME_CONTAINERS)
     if output:
         for item in output:
+            item["schema"] = "ayon:container-3.0"
+            item["id"] = AYON_CONTAINER_ID
             if "objectName" not in item and "members" in item:
                 members = item["members"]
                 if isinstance(members, list):
