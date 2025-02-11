@@ -5,15 +5,12 @@ import copy
 import json
 import time
 from uuid import uuid4
-from abc import ABCMeta, abstractmethod, abstractproperty
-
-import six
+from abc import ABC, abstractmethod
 
 from ayon_core.lib import Logger
 from ayon_core.addons import AddonsManger
 
-
-TMP_FILE_PREFIX = "opw_tvp_"
+TMP_FILE_PREFIX = "ayonw_tvp_"
 
 
 class JobFailed(Exception):
@@ -31,8 +28,7 @@ class JobFailed(Exception):
         super().__init__(error_msg)
 
 
-@six.add_metaclass(ABCMeta)
-class BaseCommand:
+class BaseCommand(ABC):
     """Abstract TVPaint command which can be executed through worker.
 
     Each command must have unique name and implemented 'execute' and
@@ -44,7 +40,8 @@ class BaseCommand:
     through server to a worker where is replicated one by one, executed and
     result sent back to sender through server.
     """
-    @abstractproperty
+    @property
+    @abstractmethod
     def name(self):
         """Command name (must be unique)."""
         pass
@@ -290,8 +287,7 @@ class CollectSceneData(BaseCommand):
         return cls(data)
 
 
-@six.add_metaclass(ABCMeta)
-class TVPaintCommands:
+class TVPaintCommands(ABC):
     """Wrapper around TVPaint commands to be able send multiple commands.
 
     Commands may send one or multiple commands at once. Also gives api access
