@@ -179,12 +179,20 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
     def initial_launch(self):
         # Setup project context
         # - if was used e.g. template the context might be invalid.
-        log.info("Setting up project...")
+        if not self.get_current_workfile():
+            return
+
+        log.info("Setting up context...")
         global_context = get_global_context()
         project_name = global_context.get("project_name")
         folder_path = global_context.get("folder_path")
         task_name = global_context.get("task_name")
-        if not project_name or not folder_path:
+        if not project_name:
+            return
+
+        save_current_workfile_context(global_context)
+
+        if not folder_path:
             return
 
         folder_entity = ayon_api.get_folder_by_path(project_name, folder_path)
