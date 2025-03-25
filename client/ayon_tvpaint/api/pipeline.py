@@ -177,13 +177,8 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         return get_containers()
 
     def initial_launch(self):
-        # Setup project settings if its the template that's launched.
-        # TODO also check for template creation when it's possible to define
-        #   templates
-        last_workfile = os.environ.get("AYON_LAST_WORKFILE")
-        if not last_workfile or os.path.exists(last_workfile):
-            return
-
+        # Setup project context
+        # - if was used e.g. template the context might be invalid.
         log.info("Setting up project...")
         global_context = get_global_context()
         project_name = global_context.get("project_name")
