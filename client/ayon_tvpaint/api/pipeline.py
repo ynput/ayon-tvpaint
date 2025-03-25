@@ -84,6 +84,10 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
 
         register_event_callback("application.launched", self.initial_launch)
         register_event_callback("application.exit", self.application_exit)
+        register_event_callback(
+            "workfile.open.after",
+            self._on_workfile_open_after
+        )
 
     def get_current_project_name(self):
         """
@@ -227,6 +231,11 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         webserver_url = os.environ.get("AYON_WEBSERVER_URL")
         rest_api_url = "{}/timers_manager/stop_timer".format(webserver_url)
         requests.post(rest_api_url)
+
+    def _on_workfile_open_after(self):
+        # Make sure opened workfile has stored correct context
+        global_context = get_global_context()
+        save_current_workfile_context(global_context)
 
 
 def containerise(
