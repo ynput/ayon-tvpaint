@@ -84,6 +84,10 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
 
         register_event_callback("application.launched", self.initial_launch)
         register_event_callback("application.exit", self.application_exit)
+        register_event_callback(
+            "workfile.open.after",
+            self._on_workfile_open_after
+        )
 
     def get_current_project_name(self):
         """
@@ -177,19 +181,25 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         return get_containers()
 
     def initial_launch(self):
-        # Setup project settings if its the template that's launched.
-        # TODO also check for template creation when it's possible to define
-        #   templates
-        last_workfile = os.environ.get("AYON_LAST_WORKFILE")
-        if not last_workfile or os.path.exists(last_workfile):
+        # Setup project context
+        # - if was used e.g. template the context might be invalid.
+        if not self.get_current_workfile():
             return
 
-        log.info("Setting up project...")
+        log.info("Setting up context...")
         global_context = get_global_context()
         project_name = global_context.get("project_name")
+        if not project_name:
+            return
+
+        save_current_workfile_context(global_context)
+        # TODO fix 'set_context_settings'
+        return
+
         folder_path = global_context.get("folder_path")
         task_name = global_context.get("task_name")
-        if not project_name or not folder_path:
+
+        if not folder_path:
             return
 
         folder_entity = ayon_api.get_folder_by_path(project_name, folder_path)
@@ -205,7 +215,7 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
                 "because no task was found.")
             context_entity = folder_entity
 
-        set_context_settings(project_name, context_entity)
+        set_context_settings(context_entity)
 
     def application_exit(self):
         """Logic related to TimerManager.
@@ -224,6 +234,11 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         webserver_url = os.environ.get("AYON_WEBSERVER_URL")
         rest_api_url = "{}/timers_manager/stop_timer".format(webserver_url)
         requests.post(rest_api_url)
+
+    def _on_workfile_open_after(self):
+        # Make sure opened workfile has stored correct context
+        global_context = get_global_context()
+        save_current_workfile_context(global_context)
 
 
 def containerise(
@@ -482,24 +497,25 @@ def get_containers():
     return output
 
 
-def set_context_settings(project_name, task_entity):
+def set_context_settings(context_entity):
     """Set workfile settings by folder entity attributes.
 
     Change fps, resolution and frame start/end.
 
     Args:
-        project_name (str): Project name.
-        task_entity (dict[str, Any]): Folder entity.
+        context_entity (dict[str, Any]): Task or folder entity.
 
     """
-
-    if not task_entity:
+    # TODO We should fix these issues:
+    # - do not use 'tv_resizepage' or find out why it removes layers
+    # - mark in/out should respect existing mark in value if is set
+    if not context_entity:
         return
 
-    task_attributes = task_entity["attrib"]
+    attributes = context_entity["attrib"]
 
-    width = task_attributes.get("resolutionWidth")
-    height = task_attributes.get("resolutionHeight")
+    width = attributes.get("resolutionWidth")
+    height = attributes.get("resolutionHeight")
     if width is None or height is None:
         print("Resolution was not found!")
     else:
@@ -507,7 +523,7 @@ def set_context_settings(project_name, task_entity):
             "tv_resizepage {} {} 0".format(width, height)
         )
 
-    framerate = task_attributes.get("fps")
+    framerate = attributes.get("fps")
 
     if framerate is not None:
         execute_george(
@@ -516,15 +532,15 @@ def set_context_settings(project_name, task_entity):
     else:
         print("Framerate was not found!")
 
-    frame_start = task_attributes.get("frameStart")
-    frame_end = task_attributes.get("frameEnd")
+    frame_start = attributes.get("frameStart")
+    frame_end = attributes.get("frameEnd")
 
     if frame_start is None or frame_end is None:
         print("Frame range was not found!")
         return
 
-    handle_start = task_attributes.get("handleStart")
-    handle_end = task_attributes.get("handleEnd")
+    handle_start = attributes.get("handleStart") or 0
+    handle_end = attributes.get("handleEnd") or 0
 
     # Always start from 0 Mark In and set only Mark Out
     mark_in = 0
