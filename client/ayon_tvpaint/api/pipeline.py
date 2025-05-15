@@ -23,6 +23,7 @@ from .lib import (
     execute_george,
     execute_george_through_file
 )
+from .communication_server import CommunicationWrapper, MainThreadItem
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +242,12 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         # Make sure opened workfile has stored correct context
         global_context = get_global_context()
         save_current_workfile_context(global_context)
-        self._set_workfile_attributes()
+        communicator = CommunicationWrapper.communicator
+        if hasattr(communicator, "execute_in_main_thread"):
+            communicator.execute_in_main_thread(
+                MainThreadItem(self._set_workfile_attributes),
+                False
+            )
 
 
 def containerise(

@@ -880,7 +880,6 @@ class QtCommunicator(BaseCommunicator):
         self.callback_queue.append(main_thread_item)
         if wait:
             return main_thread_item.wait()
-        return
 
     async def async_execute_in_main_thread(self, main_thread_item, wait=True):
         """Add `MainThreadItem` to callback queue and wait for result."""
