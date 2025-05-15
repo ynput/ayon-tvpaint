@@ -23,6 +23,7 @@ from .lib import (
     execute_george,
     execute_george_through_file
 )
+from .communication_server import CommunicationWrapper, MainThreadItem
 
 log = logging.getLogger(__name__)
 
@@ -181,9 +182,13 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         return get_containers()
 
     def initial_launch(self):
+        self._set_workfile_attributes()
+
+    def _set_workfile_attributes(self):
         # Setup project context
         # - if was used e.g. template the context might be invalid.
-        if not self.get_current_workfile():
+        filepath = self.get_current_workfile()
+        if not filepath:
             return
 
         log.info("Setting up context...")
@@ -193,8 +198,6 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             return
 
         save_current_workfile_context(global_context)
-        # TODO fix 'set_context_settings'
-        return
 
         folder_path = global_context.get("folder_path")
         task_name = global_context.get("task_name")
@@ -215,7 +218,7 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
                 "because no task was found.")
             context_entity = folder_entity
 
-        set_context_settings(context_entity)
+        set_context_settings(context_entity, filepath)
 
     def application_exit(self):
         """Logic related to TimerManager.
@@ -239,6 +242,12 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         # Make sure opened workfile has stored correct context
         global_context = get_global_context()
         save_current_workfile_context(global_context)
+        communicator = CommunicationWrapper.communicator
+        if hasattr(communicator, "execute_in_main_thread"):
+            communicator.execute_in_main_thread(
+                MainThreadItem(self._set_workfile_attributes),
+                False
+            )
 
 
 def containerise(
@@ -497,18 +506,16 @@ def get_containers():
     return output
 
 
-def set_context_settings(context_entity):
+def set_context_settings(context_entity, filepath):
     """Set workfile settings by folder entity attributes.
 
     Change fps, resolution and frame start/end.
 
     Args:
         context_entity (dict[str, Any]): Task or folder entity.
+        filepath (str): Current workfile.
 
     """
-    # TODO We should fix these issues:
-    # - do not use 'tv_resizepage' or find out why it removes layers
-    # - mark in/out should respect existing mark in value if is set
     if not context_entity:
         return
 
@@ -519,18 +526,39 @@ def set_context_settings(context_entity):
     if width is None or height is None:
         print("Resolution was not found!")
     else:
-        execute_george(
-            "tv_resizepage {} {} 0".format(width, height)
-        )
+        current_width = int(execute_george("tv_getwidth"))
+        current_height = int(execute_george("tv_getheight"))
+        if current_width != width or current_height != height:
+            message = (
+                f"Expected project resolution is {width}x{height}"
+                f" but current is {current_width}x{current_height}."
+                "\nDo you want to resize the project?"
+                "\nWARNING: This step will resize content of the project."
+                "|Yes|No"
+            )
+            result = execute_george(f"tv_request {message}")
+            if result == "1":
+                p1, p2 = os.path.splitext(filepath)
+                idx = 0
+                while True:
+                    bckup_path = f"{p1}_backup{idx}{p2}"
+                    if not os.path.exists(bckup_path):
+                        break
+                    idx += 1
+                bckup_path = bckup_path.replace("\\", "/")
+                filepath = filepath.replace("\\", "/")
+                execute_george(f"tv_saveproject {bckup_path}")
+                execute_george(f"tv_resizepage {width} {height} 1")
+                execute_george(f"tv_saveproject {filepath}")
 
     framerate = attributes.get("fps")
 
-    if framerate is not None:
-        execute_george(
-            "tv_framerate {} \"timestretch\"".format(framerate)
-        )
-    else:
+    if framerate is None:
         print("Framerate was not found!")
+    else:
+        execute_george(
+            f"tv_framerate {framerate} \"timestretch\""
+        )
 
     frame_start = attributes.get("frameStart")
     frame_end = attributes.get("frameEnd")
@@ -542,9 +570,10 @@ def set_context_settings(context_entity):
     handle_start = attributes.get("handleStart") or 0
     handle_end = attributes.get("handleEnd") or 0
 
-    # Always start from 0 Mark In and set only Mark Out
-    mark_in = 0
+    # Use current Mark In and set only Mark Out
+    mark_in_frame, mark_in_state, _ = execute_george("tv_markin").split(" ")
+    mark_in = int(mark_in_frame)
     mark_out = mark_in + (frame_end - frame_start) + handle_start + handle_end
 
-    execute_george("tv_markin {} set".format(mark_in))
-    execute_george("tv_markout {} set".format(mark_out))
+    execute_george(f"tv_markin {mark_in} set")
+    execute_george(f"tv_markout {mark_out} set")
