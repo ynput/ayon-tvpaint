@@ -193,8 +193,6 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             return
 
         save_current_workfile_context(global_context)
-        # TODO fix 'set_context_settings'
-        return
 
         folder_path = global_context.get("folder_path")
         task_name = global_context.get("task_name")
@@ -506,9 +504,6 @@ def set_context_settings(context_entity):
         context_entity (dict[str, Any]): Task or folder entity.
 
     """
-    # TODO We should fix these issues:
-    # - do not use 'tv_resizepage' or find out why it removes layers
-    # - mark in/out should respect existing mark in value if is set
     if not context_entity:
         return
 
@@ -519,18 +514,27 @@ def set_context_settings(context_entity):
     if width is None or height is None:
         print("Resolution was not found!")
     else:
-        execute_george(
-            "tv_resizepage {} {} 0".format(width, height)
-        )
+        current_width = int(execute_george("tv_getwidth"))
+        current_height = int(execute_george("tv_getheight"))
+        if current_width != width or current_height != height:
+            message = (
+                f"Expected project resolution is {width}x{height}"
+                f" but current is {current_width}x{current_height}."
+                " Do you want to resize the project?"
+                "\n\nThis step may resize content of the project.|Yes|No"
+            )
+            result = execute_george(f"tv_request \"{message}\"")
+            if result == "1":
+                execute_george(f"tv_resizepage {width} {height} 1")
 
     framerate = attributes.get("fps")
 
-    if framerate is not None:
-        execute_george(
-            "tv_framerate {} \"timestretch\"".format(framerate)
-        )
-    else:
+    if framerate is None:
         print("Framerate was not found!")
+    else:
+        execute_george(
+            f"tv_framerate {framerate} \"timestretch\""
+        )
 
     frame_start = attributes.get("frameStart")
     frame_end = attributes.get("frameEnd")
@@ -542,9 +546,10 @@ def set_context_settings(context_entity):
     handle_start = attributes.get("handleStart") or 0
     handle_end = attributes.get("handleEnd") or 0
 
-    # Always start from 0 Mark In and set only Mark Out
-    mark_in = 0
+    # Use current Mark In and set only Mark Out
+    mark_in_frame, mark_in_state, _ = execute_george("tv_markin").split(" ")
+    mark_in = int(mark_in_frame)
     mark_out = mark_in + (frame_end - frame_start) + handle_start + handle_end
 
-    execute_george("tv_markin {} set".format(mark_in))
-    execute_george("tv_markout {} set".format(mark_out))
+    execute_george(f"tv_markin {mark_in} set")
+    execute_george(f"tv_markout {mark_out} set")
