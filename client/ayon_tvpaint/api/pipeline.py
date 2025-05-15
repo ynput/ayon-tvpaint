@@ -181,9 +181,13 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         return get_containers()
 
     def initial_launch(self):
+        self._set_workfile_attributes()
+
+    def _set_workfile_attributes(self):
         # Setup project context
         # - if was used e.g. template the context might be invalid.
-        if not self.get_current_workfile():
+        filepath = self.get_current_workfile()
+        if not filepath:
             return
 
         log.info("Setting up context...")
@@ -213,7 +217,7 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
                 "because no task was found.")
             context_entity = folder_entity
 
-        set_context_settings(context_entity)
+        set_context_settings(context_entity, filepath)
 
     def application_exit(self):
         """Logic related to TimerManager.
@@ -237,6 +241,7 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         # Make sure opened workfile has stored correct context
         global_context = get_global_context()
         save_current_workfile_context(global_context)
+        self._set_workfile_attributes()
 
 
 def containerise(
@@ -495,13 +500,14 @@ def get_containers():
     return output
 
 
-def set_context_settings(context_entity):
+def set_context_settings(context_entity, filepath):
     """Set workfile settings by folder entity attributes.
 
     Change fps, resolution and frame start/end.
 
     Args:
         context_entity (dict[str, Any]): Task or folder entity.
+        filepath (str): Current workfile.
 
     """
     if not context_entity:
@@ -520,12 +526,24 @@ def set_context_settings(context_entity):
             message = (
                 f"Expected project resolution is {width}x{height}"
                 f" but current is {current_width}x{current_height}."
-                " Do you want to resize the project?"
-                "\n\nThis step may resize content of the project.|Yes|No"
+                "\nDo you want to resize the project?"
+                "\nWARNING: This step will resize content of the project."
+                "|Yes|No"
             )
-            result = execute_george(f"tv_request \"{message}\"")
+            result = execute_george(f"tv_request {message}")
             if result == "1":
+                p1, p2 = os.path.splitext(filepath)
+                idx = 0
+                while True:
+                    bckup_path = f"{p1}_backup{idx}{p2}"
+                    if not os.path.exists(bckup_path):
+                        break
+                    idx += 1
+                bckup_path = bckup_path.replace("\\", "/")
+                filepath = filepath.replace("\\", "/")
+                execute_george(f"tv_saveproject {bckup_path}")
                 execute_george(f"tv_resizepage {width} {height} 1")
+                execute_george(f"tv_saveproject {filepath}")
 
     framerate = attributes.get("fps")
 
