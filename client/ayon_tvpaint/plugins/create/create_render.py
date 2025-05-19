@@ -398,6 +398,16 @@ class CreateRenderPass(TVPaintCreator):
 
     # Settings
     mark_for_review = True
+    def register_callbacks(self):
+        self.create_context.add_instances_added_callback(
+            self._on_added_instance
+        )
+        self.create_context.add_instances_removed_callback(
+            self._on_removed_instance
+        )
+        self.create_context.add_value_changed_callback(
+            self._on_value_change
+        )
 
     def apply_settings(self, project_settings):
         plugin_settings = (
@@ -686,6 +696,62 @@ class CreateRenderPass(TVPaintCreator):
         if not render_layers:
             render_layers.append({"value": None, "label": "N/A"})
         return render_layers
+
+    def _on_added_instance(self, event):
+        if any(
+            instance.creator_identifier == "render.layer"
+            for instance in event["instances"]
+        ):
+            self._update_instance_attributes()
+
+    def _on_removed_instance(self, event):
+        if any(
+            instance.creator_identifier == "render.layer"
+            for instance in event["instances"]
+        ):
+            self._update_instance_attributes()
+
+    def _on_value_change(self, event):
+        changed_ids = set()
+        for change in event["changes"]:
+            instance = change["instance"]
+            if (
+                instance is None
+                or instance.creator_identifier != CreateRenderlayer.identifier
+            ):
+                continue
+
+            if "productName" in change["changes"]:
+                changed_ids.add(instance.id)
+
+        if changed_ids:
+            self._update_instance_attributes(changed_ids)
+
+    def _update_instance_attributes(self, render_layer_ids=None):
+        self.create_context.create_plugin_pre_create_attr_defs_changed(
+            CreateRenderPass.identifier
+        )
+        if render_layer_ids is not None and not render_layer_ids:
+            return
+
+        filtered_instances = []
+        for instance in self.create_context.instances:
+            if instance.creator_identifier != self.identifier:
+                continue
+            rl_id = instance.creator_attributes["render_layer_instance_id"]
+            if render_layer_ids is not None and rl_id not in render_layer_ids:
+                continue
+            filtered_instances.append(instance)
+
+        if not filtered_instances:
+            return
+
+        with self.create_context.bulk_create_attr_defs_change():
+            for instance in filtered_instances:
+                instance.set_create_attr_defs(
+                    self.get_attr_defs_for_instance(instance)
+                )
+
 
 class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     """Create Render Layer and Render Pass instances based on scene data.
