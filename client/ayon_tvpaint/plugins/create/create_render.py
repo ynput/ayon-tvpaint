@@ -627,17 +627,7 @@ class CreateRenderPass(TVPaintCreator):
     def get_pre_create_attr_defs(self):
         # Find available Render Layers
         # - instances are created after creators reset
-        current_instances = self.host.list_instances()
-        render_layers = [
-            {
-                "value": inst["instance_id"],
-                "label": inst["productName"]
-            }
-            for inst in current_instances
-            if inst.get("creator_identifier") == CreateRenderlayer.identifier
-        ]
-        if not render_layers:
-            render_layers.append({"value": None, "label": "N/A"})
+        render_layers = self._get_render_layers_items()
 
         return [
             EnumDef(
@@ -655,8 +645,35 @@ class CreateRenderPass(TVPaintCreator):
             )
         ]
 
-    def get_instance_attr_defs(self):
-        # Find available Render Layers
+    def get_attr_defs_for_instance(self, instance):
+        render_layer_instance_id = (
+            instance.creator_attributes["render_layer_instance_id"]
+        )
+        render_layers = self._get_render_layers_items()
+        default = None
+        for layer in render_layers:
+            if layer["value"] == render_layer_instance_id:
+                default = render_layer_instance_id
+                break
+
+        return [
+            EnumDef(
+                "render_layer_instance_id",
+                label="Render Layer",
+                items=render_layers,
+                default=default,
+            ),
+            UILabelDef(
+                "NOTE: Try to hit refresh if you don't see a Render Layer"
+            ),
+            BoolDef(
+                "mark_for_review",
+                label="Review",
+                default=self.mark_for_review
+            )
+        ]
+
+    def _get_render_layers_items(self):
         current_instances = self.create_context.instances
         render_layers = [
             {
@@ -668,23 +685,7 @@ class CreateRenderPass(TVPaintCreator):
         ]
         if not render_layers:
             render_layers.append({"value": None, "label": "N/A"})
-
-        return [
-            EnumDef(
-                "render_layer_instance_id",
-                label="Render Layer",
-                items=render_layers
-            ),
-            UILabelDef(
-                "NOTE: Try to hit refresh if you don't see a Render Layer"
-            ),
-            BoolDef(
-                "mark_for_review",
-                label="Review",
-                default=self.mark_for_review
-            )
-        ]
-
+        return render_layers
 
 class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     """Create Render Layer and Render Pass instances based on scene data.
