@@ -34,11 +34,47 @@ class CreateRenderLayerModel(BaseSettingsModel):
         default_factory=list, title="Default variants")
 
 
+class LayerNameTemplateModel(BaseSettingsModel):
+    enabled: bool = SettingsField(False, title="Enabled")
+    template: str = SettingsField(
+        "G{group_id:0>3}_L{layer_id:0>3}_{variant}",
+        title="Layer name template",
+        description="Available keys '{group_id}' '{layer_id}' '{variant}'",
+        placeholder="G{group_id:0>3}_L{layer_id:0>3}_{variant}",
+    )
+    group_id_start: int = SettingsField(
+        10,
+        title="Group index first value",
+        ge=0,
+    )
+    group_id_increment: int = SettingsField(
+        10,
+        title="Group index increment",
+        ge=1,
+    )
+    layer_id_start: int = SettingsField(
+        10,
+        title="Layer index first value",
+        ge=0,
+    )
+    layer_id_increment: int = SettingsField(
+        10,
+        title="Layer index increment",
+        ge=1,
+    )
+
+
 class CreateRenderPassModel(BaseSettingsModel):
     mark_for_review: bool = SettingsField(True, title="Review by default")
     default_variant: str = SettingsField(title="Default variant")
     default_variants: list[str] = SettingsField(
-        default_factory=list, title="Default variants")
+        default_factory=list, title="Default variants"
+    )
+    layer_name_template: LayerNameTemplateModel = SettingsField(
+        default_factory=LayerNameTemplateModel,
+        title="Layer name template",
+        description="Automatically change TVPaint layer name using template.",
+    )
 
 
 class AutoDetectCreateRenderModel(BaseSettingsModel):
