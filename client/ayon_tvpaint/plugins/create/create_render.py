@@ -33,7 +33,6 @@ Todos:
     Add option to extract marked layers and passes as json output format for
         AfterEffects.
 """
-
 import collections
 from typing import Any, Optional, Union
 
@@ -42,7 +41,6 @@ import ayon_api
 from ayon_core.lib import (
     prepare_template_data,
     AbstractAttrDef,
-    UILabelDef,
     UISeparatorDef,
     EnumDef,
     TextDef,
@@ -677,9 +675,6 @@ class CreateRenderPass(TVPaintCreator):
                 label="Render Layer",
                 items=render_layers
             ),
-            UILabelDef(
-                "NOTE: Try to hit refresh if you don't see a Render Layer"
-            ),
             BoolDef(
                 "mark_for_review",
                 label="Review",
@@ -704,9 +699,6 @@ class CreateRenderPass(TVPaintCreator):
                 label="Render Layer",
                 items=render_layers,
                 default=default,
-            ),
-            UILabelDef(
-                "NOTE: Try to hit refresh if you don't see a Render Layer"
             ),
             BoolDef(
                 "mark_for_review",
