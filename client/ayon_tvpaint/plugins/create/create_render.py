@@ -993,7 +993,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
             variant = layer_name
             render_pass = render_pass_by_layer_name.get(layer_name)
             if render_pass is not None:
-                if (render_pass["layer_names"]) > 1:
+                if len(render_pass["layer_names"]) > 1:
                     variant = render_pass["variant"]
 
             product_name = creator.get_product_name(
