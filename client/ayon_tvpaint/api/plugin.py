@@ -53,6 +53,38 @@ class TVPaintCreatorCommon:
             cur_instance_data.update(instance_data)
         self.host.write_instances(cur_instances)
 
+    def _update_instance_context(self, instance: CreatedInstance) -> bool:
+        host_name = self.create_context.host_name
+        project_name = self.create_context.get_current_project_name()
+        folder_path = self.create_context.get_current_folder_path()
+        task_name = self.create_context.get_current_task_name()
+        if (
+            instance["folderPath"] == folder_path
+            and instance["task"] == task_name
+        ):
+            return False
+
+        project_entity = self.create_context.get_current_project_entity()
+        folder_entity = self.create_context.get_folder_entity(
+            folder_path
+        )
+        task_entity = self.create_context.get_task_entity(
+            folder_path, task_name
+        )
+        product_name = self.get_product_name(
+            project_name,
+            folder_entity,
+            task_entity,
+            instance["variant"],
+            host_name,
+            instance,
+            project_entity=project_entity,
+        )
+        instance["folderPath"] = folder_path
+        instance["task"] = task_name
+        instance["productName"] = product_name
+        return True
+
     def _custom_get_product_name(
         self,
         project_name,
