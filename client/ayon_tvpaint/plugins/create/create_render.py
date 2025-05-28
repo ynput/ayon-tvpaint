@@ -155,17 +155,10 @@ class CreateRenderlayer(TVPaintCreator):
         host_name,
         instance
     ):
-        dynamic_data = super().get_dynamic_data(
-            project_name,
-            folder_entity,
-            task_entity,
-            variant,
-            host_name,
-            instance
-        )
-        dynamic_data["renderpass"] = self.default_pass_name
-        dynamic_data["renderlayer"] = variant
-        return dynamic_data
+        return {
+            "renderpass": self.default_pass_name,
+            "renderlayer": variant,
+        }
 
     def _get_selected_group_ids(self):
         return {
@@ -1220,17 +1213,10 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
         host_name,
         instance
     ):
-        dynamic_data = super().get_dynamic_data(
-            project_name,
-            folder_entity,
-            task_entity,
-            variant,
-            host_name,
-            instance
-        )
-        dynamic_data["renderpass"] = "{renderpass}"
-        dynamic_data["renderlayer"] = variant
-        return dynamic_data
+        return {
+            "renderpass": "{renderpass}",
+            "renderlayer": variant,
+        }
 
     def _create_new_instance(self):
         create_context = self.create_context

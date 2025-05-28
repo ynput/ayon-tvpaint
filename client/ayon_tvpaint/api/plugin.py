@@ -119,20 +119,6 @@ class TVPaintCreator(Creator, TVPaintCreatorCommon):
         for instance in instances:
             self._remove_instance_from_context(instance)
 
-    def get_dynamic_data(self, *args, **kwargs):
-        # Change folder and name by current workfile context
-        create_context = self.create_context
-        folder_path = create_context.get_current_folder_path()
-        task_name = create_context.get_current_task_name()
-        output = {}
-        if folder_path:
-            folder_name = folder_path.rsplit("/")[-1]
-            output["asset"] = folder_name
-            output["folder"] = {"name": folder_name}
-            if task_name:
-                output["task"] = task_name
-        return output
-
     def get_product_name(self, *args, **kwargs):
         return self._custom_get_product_name(*args, **kwargs)
 
