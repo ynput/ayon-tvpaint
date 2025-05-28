@@ -1,5 +1,3 @@
-import ayon_api
-
 from ayon_core.pipeline import CreatedInstance
 from ayon_tvpaint.api.plugin import TVPaintAutoCreator
 
@@ -35,18 +33,20 @@ class TVPaintWorkfileCreator(TVPaintAutoCreator):
             existing_folder_path = existing_instance["folderPath"]
 
         if existing_instance is None:
-            folder_entity = ayon_api.get_folder_by_path(
-                project_name, folder_path
+            project_entity = self.create_context.get_current_project_entity()
+            folder_entity = self.create_context.get_folder_entity(
+                folder_path
             )
-            task_entity = ayon_api.get_task_by_name(
-                project_name, folder_entity["id"], task_name
+            task_entity = self.create_context.get_task_entity(
+                folder_path, task_name
             )
             product_name = self.get_product_name(
                 project_name,
                 folder_entity,
                 task_entity,
                 self.default_variant,
-                host_name
+                host_name,
+                project_entity=project_entity,
             )
             data = {
                 "folderPath": folder_path,
@@ -66,11 +66,12 @@ class TVPaintWorkfileCreator(TVPaintAutoCreator):
             existing_folder_path != folder_path
             or existing_instance["task"] != task_name
         ):
-            folder_entity = ayon_api.get_folder_by_path(
-                project_name, folder_path
+            project_entity = self.create_context.get_current_project_entity()
+            folder_entity = self.create_context.get_folder_entity(
+                folder_path
             )
-            task_entity = ayon_api.get_task_by_name(
-                project_name, folder_entity["id"], task_name
+            task_entity = self.create_context.get_task_entity(
+                folder_path, task_name
             )
             product_name = self.get_product_name(
                 project_name,
@@ -78,7 +79,8 @@ class TVPaintWorkfileCreator(TVPaintAutoCreator):
                 task_entity,
                 existing_instance["variant"],
                 host_name,
-                existing_instance
+                existing_instance,
+                project_entity=project_entity,
             )
             existing_instance["folderPath"] = folder_path
             existing_instance["task"] = task_name
