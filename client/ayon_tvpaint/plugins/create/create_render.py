@@ -297,6 +297,15 @@ class CreateRenderlayer(TVPaintCreator):
             )
         ]
 
+    def collect_instances(self):
+        super().collect_instances()
+        if not self._use_current_context:
+            return
+
+        for instance in self.create_context.instances:
+            if instance.creator_identifier == self.identifier:
+                self._update_instance_context(instance)
+
     def update_instances(self, update_list):
         self._update_color_groups()
         self._update_renderpass_groups()
@@ -451,6 +460,8 @@ class CreateRenderPass(TVPaintCreator):
 
             instance = CreatedInstance.from_existing(instance_data, self)
             self._add_instance_to_context(instance)
+            if self._use_current_context:
+                self._update_instance_context(instance)
 
             self._set_layer_name(
                 instance["variant"],
