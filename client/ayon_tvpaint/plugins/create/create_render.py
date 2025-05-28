@@ -36,8 +36,6 @@ Todos:
 import collections
 from typing import Any, Optional, Union
 
-import ayon_api
-
 from ayon_core.lib import (
     prepare_template_data,
     AbstractAttrDef,
@@ -1053,10 +1051,11 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
         project_name: str = self.create_context.get_current_project_name()
         folder_path: str = instance_data["folderPath"]
         task_name: str = instance_data["task"]
-        folder_entity: dict[str, Any] = ayon_api.get_folder_by_path(
-            project_name, folder_path)
-        task_entity: dict[str, Any] = ayon_api.get_task_by_name(
-            project_name, folder_entity["id"], task_name
+        folder_entity: dict[str, Any] = self.create_context.get_folder_entity(
+            folder_path
+        )
+        task_entity: dict[str, Any] = self.create_context.get_task_entity(
+            folder_path, task_name
         )
 
         render_layers_by_group_id: dict[int, CreatedInstance] = {}
@@ -1237,13 +1236,9 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
         create_context = self.create_context
         host_name = create_context.host_name
         project_name = create_context.get_current_project_name()
-        folder_path = create_context.get_current_folder_path()
-        task_name = create_context.get_current_task_name()
+        folder_entity = create_context.get_current_folder_entity()
+        task_entity = create_context.get_current_task_entity()
 
-        folder_entity = ayon_api.get_folder_by_path(project_name, folder_path)
-        task_entity = ayon_api.get_task_by_name(
-            project_name, folder_entity["id"], task_name
-        )
         product_name = self.get_product_name(
             project_name,
             folder_entity,
@@ -1252,8 +1247,8 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
             host_name,
         )
         data = {
-            "folderPath": folder_path,
-            "task": task_name,
+            "folderPath": folder_entity["path"],
+            "task": task_entity["name"],
             "variant": self.default_variant,
             "creator_attributes": {
                 "render_pass_name": self.default_pass_name,
@@ -1297,11 +1292,9 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
             existing_name != folder_path
             or existing_instance["task"] != task_name
         ):
-            folder_entity = ayon_api.get_folder_by_path(
-                project_name, folder_path
-            )
-            task_entity = ayon_api.get_task_by_name(
-                project_name, folder_entity["id"], task_name
+            folder_entity = self.create_context.get_folder_entity(folder_path)
+            task_entity = self.create_context.get_task_entity(
+                folder_path, task_name
             )
             product_name = self.get_product_name(
                 project_name,
