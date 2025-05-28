@@ -105,6 +105,10 @@ class AutoDetectCreateRenderModel(BaseSettingsModel):
 
 
 class CreatePluginsModel(BaseSettingsModel):
+    use_current_context: bool = SettingsField(
+        True,
+        title="Force to use current context",
+    )
     create_workfile: CreateWorkfileModel = SettingsField(
         default_factory=CreateWorkfileModel,
         title="Create Workfile"
@@ -132,6 +136,7 @@ class CreatePluginsModel(BaseSettingsModel):
 
 
 DEFAULT_CREATE_SETTINGS = {
+    "use_current_context": True,
     "create_workfile": {
         "enabled": True,
         "default_variant": "Main",
