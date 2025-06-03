@@ -33,6 +33,8 @@ Todos:
     Add option to extract marked layers and passes as json output format for
         AfterEffects.
 """
+import re
+import copy
 import collections
 from typing import Any, Optional, Union
 
@@ -859,6 +861,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     group_name_template = "L{group_index}"
     group_idx_offset = 10
     group_idx_padding = 3
+    layer_name_template = {"enabled": False}
 
     def apply_settings(self, project_settings):
         super().apply_settings(project_settings)
@@ -874,6 +877,14 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
         self.group_idx_offset = plugin_settings["group_idx_offset"]
         self.group_idx_padding = plugin_settings["group_idx_padding"]
         self.create_allow_context_change = not self._use_current_context
+
+
+        render_pass_settings = (
+            project_settings["tvpaint"]["create"]["create_render_pass"]
+        )
+        self.layer_name_template = copy.deepcopy(
+            render_pass_settings["layer_name_template"]
+        )
 
     def _rename_groups(
         self,
@@ -935,7 +946,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
         mark_for_review: bool,
         existing_instance: Optional[CreatedInstance] = None,
     ) -> Union[CreatedInstance, None]:
-        match_group: Union[dict[str, Any], None] = next(
+        match_group: Optional[dict[str, Any]] = next(
             (
                 group
                 for group in groups
@@ -996,13 +1007,44 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
             for layer_name in render_pass["layer_names"]:
                 render_pass_by_layer_name[layer_name] = render_pass
 
+        # Use renaming template to parse correct variant from existing layer
+        #   names.
+        name_regex = None
+        if self.layer_name_template["enabled"]:
+            template = self.layer_name_template["template"]
+            fake_group = "___group___"
+            fake_layer = "___layer___"
+            fake_variant = "___variant___"
+            try:
+                name_regex = template.format(
+                    layer_id=fake_layer,
+                    group_id=fake_group,
+                    variant=fake_variant,
+                )
+            except Exception:
+                name_regex = ""
+
+            for src, regex in (
+                (fake_group, "(?P<group>\d+)"),
+                (fake_layer, "(?P<layer>\d+)"),
+                (fake_variant, "(?P<variant>.*)"),
+            ):
+                name_regex = name_regex.replace(src, regex)
+            name_regex = re.compile(name_regex)
+
         for layer in layers:
             layer_name = layer["name"]
-            variant = layer_name
+            variant = None
             render_pass = render_pass_by_layer_name.get(layer_name)
-            if render_pass is not None:
-                if len(render_pass["layer_names"]) > 1:
-                    variant = render_pass["variant"]
+            if render_pass is not None and len(render_pass["layer_names"]) > 0:
+                variant = render_pass["variant"]
+            elif name_regex is not None:
+                result = name_regex.match(layer_name)
+                if result is not None:
+                    variant = result.group("variant")
+
+            if not variant:
+                variant = layer_name
 
             product_name = creator.get_product_name(
                 project_entity["name"],
