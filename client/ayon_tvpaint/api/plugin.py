@@ -53,6 +53,38 @@ class TVPaintCreatorCommon:
             cur_instance_data.update(instance_data)
         self.host.write_instances(cur_instances)
 
+    def _update_instance_context(self, instance: CreatedInstance) -> bool:
+        host_name = self.create_context.host_name
+        project_name = self.create_context.get_current_project_name()
+        folder_path = self.create_context.get_current_folder_path()
+        task_name = self.create_context.get_current_task_name()
+        if (
+            instance["folderPath"] == folder_path
+            and instance["task"] == task_name
+        ):
+            return False
+
+        project_entity = self.create_context.get_current_project_entity()
+        folder_entity = self.create_context.get_folder_entity(
+            folder_path
+        )
+        task_entity = self.create_context.get_task_entity(
+            folder_path, task_name
+        )
+        product_name = self.get_product_name(
+            project_name,
+            folder_entity,
+            task_entity,
+            instance["variant"],
+            host_name,
+            instance,
+            project_entity=project_entity,
+        )
+        instance["folderPath"] = folder_path
+        instance["task"] = task_name
+        instance["productName"] = product_name
+        return True
+
     def _custom_get_product_name(
         self,
         project_name,
@@ -63,6 +95,10 @@ class TVPaintCreatorCommon:
         instance=None,
         project_entity=None,
     ):
+        if host_name is None:
+            host_name = self.create_context.host_name
+        if project_entity is None:
+            project_entity = self.create_context.get_current_project_entity()
         dynamic_data = self.get_dynamic_data(
             project_name,
             folder_entity,
@@ -92,6 +128,11 @@ class TVPaintCreatorCommon:
 
 class TVPaintCreator(Creator, TVPaintCreatorCommon):
     settings_category = "tvpaint"
+    _use_current_context = False
+
+    def apply_settings(self, project_settings):
+        create_settings = project_settings["tvpaint"]["create"]
+        self._use_current_context = create_settings["use_current_context"]
 
     def collect_instances(self):
         self._collect_create_instances()
@@ -119,22 +160,16 @@ class TVPaintCreator(Creator, TVPaintCreatorCommon):
         for instance in instances:
             self._remove_instance_from_context(instance)
 
-    def get_dynamic_data(self, *args, **kwargs):
-        # Change folder and name by current workfile context
-        create_context = self.create_context
-        folder_path = create_context.get_current_folder_path()
-        task_name = create_context.get_current_task_name()
-        output = {}
-        if folder_path:
-            folder_name = folder_path.rsplit("/")[-1]
-            output["asset"] = folder_name
-            output["folder"] = {"name": folder_name}
-            if task_name:
-                output["task"] = task_name
-        return output
-
-    def get_product_name(self, *args, **kwargs):
-        return self._custom_get_product_name(*args, **kwargs)
+    def get_product_name(
+        self, project_name, folder_entity, task_entity, *args, **kwargs
+    ):
+        if self._use_current_context:
+            # Use the current context to get project and task
+            folder_entity = self.create_context.get_current_folder_entity()
+            task_entity = self.create_context.get_current_task_entity()
+        return self._custom_get_product_name(
+            project_name, folder_entity, task_entity, *args, **kwargs
+        )
 
     def _store_new_instance(self, new_instance):
         instances_data = self.host.list_instances()
