@@ -42,12 +42,24 @@ def compression_enum():
 class ExtractConvertToEXRModel(BaseSettingsModel):
     """WARNING: This plugin does not work on MacOS (using OIIO tool)."""
     enabled: bool = False
-    replace_pngs: bool = True
-
+    replace_pngs: bool = SettingsField(
+        True,
+        title="Replace original PNG files",
+        description="Remove original PNG files after transcoding to EXR",
+    )
+    auto_trim: bool = SettingsField(
+        True,
+        title="Auto Trim",
+    )
     exr_compression: str = SettingsField(
         "ZIP",
         enum_resolver=compression_enum,
         title="EXR Compression"
+    )
+    multilayer_exr: bool = SettingsField(
+        False,
+        title="Create multilayer EXR",
+        description="Merge render passes into a render layer EXR files",
     )
 
 
