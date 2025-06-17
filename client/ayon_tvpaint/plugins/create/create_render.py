@@ -470,20 +470,17 @@ class CreateRenderPass(TVPaintCreator):
 
             instance = CreatedInstance.from_existing(instance_data, self)
 
-            layer_pos = 0
-            if instance_layers:
-                max_pos = max(layer["position"] for layer in instance_layers)
-                layer_pos = (layers_count - max_pos) - 1
 
             instance.transient_data["instance_layers"] = instance_layers
             instance.transient_data["layers_count"] = layers_count
-            instance.transient_data["layer_pos"] = layer_pos
             self._add_instance_to_context(instance)
             if self._use_current_context:
                 self._update_instance_context(instance)
 
             self.update_instance_labels(
                 instance,
+                layers_count,
+                instance_layers,
                 render_layer_info.get("variant"),
                 render_layer_info.get("template_data"),
             )
@@ -519,27 +516,11 @@ class CreateRenderPass(TVPaintCreator):
     def update_instance_labels(
         self,
         instance: CreatedInstance,
+        all_layers_count: int,
+        instance_layers: list[dict[str, Any]],
         render_layer_variant: Optional[str],
-        render_layer_data: Optional[str],
+        render_layer_data: Optional[dict[str, Any]],
     ):
-        # Prepare 'renderpass' value
-        pass_data = prepare_template_data({"variant": instance["variant"]})
-
-        layer_template = "{}"
-        if self.layer_idx_padding:
-            layer_template = f"{{:0>{self.layer_idx_padding}}}"
-
-        layer_index: str = layer_template.format(
-            (instance.transient_data["layer_pos"] + 1)
-            * self.layer_idx_offset
-        )
-
-        pass_data["layer_id"] = layer_index
-        try:
-            pass_name = self.render_pass_template.format(**pass_data)
-        except (KeyError, ValueError) as exc:
-            self.log.warning(f"Failed to fill render pass name. {exc}")
-            pass_name = "{renderpass}"
 
         new_group = None
         if render_layer_variant is None:
@@ -554,10 +535,15 @@ class CreateRenderPass(TVPaintCreator):
         else:
             product_name_data = copy.deepcopy(render_layer_data)
 
-        product_name_data.update(
-            prepare_template_data({"renderpass": pass_name})
+        # Prepare 'renderpass' value
+        render_pass_name = self._get_render_pass_name(
+            all_layers_count,
+            instance_layers,
+            instance["variant"],
         )
-        print(product_name_data, self.render_pass_template)
+        product_name_data.update(
+            prepare_template_data({"renderpass": render_pass_name})
+        )
 
         try:
             new_label = instance["productName"].format(**product_name_data)
@@ -644,8 +630,16 @@ class CreateRenderPass(TVPaintCreator):
             else:
                 instances_to_remove.append(instance)
 
+        render_pass_name = self._get_render_pass_name(
+            layers_count,
+            marked_layers,
+            instance_data["variant"]
+        )
         render_layer = render_layer_instance["variant"]
-        product_name_fill_data = {"renderlayer": render_layer}
+        product_name_fill_data = {
+            "renderlayer": render_layer,
+            "renderpass": render_pass_name,
+        }
 
         # Format dynamic keys in product name
         label = product_name
@@ -779,6 +773,31 @@ class CreateRenderPass(TVPaintCreator):
         if not render_layers:
             render_layers.append({"value": None, "label": "N/A"})
         return render_layers
+
+    def _get_render_pass_name(self, all_layers_count, layers, variant):
+        max_position = 1
+        if layers:
+            max_position = max(layer["position"] for layer in layers)
+        layer_template = "{}"
+        if self.layer_idx_offset:
+            layer_template = f"{{:0>{self.layer_idx_padding}}}"
+
+        layer_index: str = layer_template.format(
+            (all_layers_count - max_position) * self.layer_idx_offset
+        )
+        output = "{renderpass}"
+        try:
+            output = self.render_pass_template.format(
+                **prepare_template_data({
+                    "variant": variant,
+                    "layer_index": layer_index,
+                })
+            )
+        except Exception:
+            self.log.warning(
+                "Failed to fill render pass template", exc_info=True
+            )
+        return output
 
     def _on_added_instance(self, event):
         if any(
@@ -1097,8 +1116,10 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
                 variant = render_pass["variant"]
             elif name_regex is not None:
                 result = name_regex.match(layer_name)
+                groups = {}
                 if result is not None:
-                    variant = result.group("variant")
+                    groups = result.groupdict()
+                variant = groups.get("variant")
 
             if not variant:
                 variant = layer_name

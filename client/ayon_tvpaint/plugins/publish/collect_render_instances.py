@@ -66,14 +66,6 @@ class CollectRenderInstances(pyblish.api.InstancePlugin):
             for layer in layers_data
             if layer["name"] in layer_names
         ]
-        layers_count = len(layers_data)
-        layer_pos = 0
-        if instance.data["layers"]:
-            self.log.debug(instance.data["layers"][0])
-            max_pos = max(
-                layer["position"] for layer in instance.data["layers"]
-            )
-            layer_pos = (layers_count - max_pos) - 1
 
         instance.data["ignoreLayersTransparency"] = (
             self.ignore_render_pass_transparency
@@ -95,17 +87,34 @@ class CollectRenderInstances(pyblish.api.InstancePlugin):
             return
 
         project_settings = instance.context.data["project_settings"]
-        render_pass_template = (
+        render_pass_settings = (
             project_settings
             ["tvpaint"]
             ["create"]
             ["create_render_pass"]
-            ["render_pass_template"]
         )
+        render_pass_template = render_pass_settings["render_pass_template"]
+        layer_idx_offset = render_pass_settings["layer_idx_offset"]
+        layer_idx_padding = render_pass_settings["layer_idx_padding"]
+        layers_count = len(layers_data)
+        layer_pos = 1
+        if instance.data["layers"]:
+            self.log.debug(instance.data["layers"][0])
+            max_pos = max(
+                layer["position"] for layer in instance.data["layers"]
+            )
+            layer_pos = layers_count - max_pos
+
+        layer_template = "{}"
+        if layer_idx_padding:
+            layer_template = f"{{:0>{layer_idx_padding}}}"
+
+        layer_index = layer_template.format(layer_pos * layer_idx_offset)
+
         render_pass_name = render_pass_template.format(
             **prepare_template_data({
                 "variant": instance.data["variant"],
-                "layer_pos": layer_pos,
+                "layer_index": layer_index,
             })
         )
 
