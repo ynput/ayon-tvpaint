@@ -66,6 +66,15 @@ class CollectRenderInstances(pyblish.api.InstancePlugin):
             for layer in layers_data
             if layer["name"] in layer_names
         ]
+        layers_count = len(layers_data)
+        layer_pos = 0
+        if instance.data["layers"]:
+            self.log.debug(instance.data["layers"][0])
+            max_pos = max(
+                layer["position"] for layer in instance.data["layers"]
+            )
+            layer_pos = (layers_count - max_pos) - 1
+
         instance.data["ignoreLayersTransparency"] = (
             self.ignore_render_pass_transparency
         )
@@ -84,10 +93,29 @@ class CollectRenderInstances(pyblish.api.InstancePlugin):
         # Invalid state
         if render_layer_data is None:
             return
+
+        project_settings = instance.context.data["project_settings"]
+        render_pass_template = (
+            project_settings
+            ["tvpaint"]
+            ["create"]
+            ["create_render_pass"]
+            ["render_pass_template"]
+        )
+        render_pass_name = render_pass_template.format(
+            **prepare_template_data({
+                "variant": instance.data["variant"],
+                "layer_pos": layer_pos,
+            })
+        )
+
         render_layer_name = render_layer_data["variant"]
         product_name = instance.data["productName"]
         instance.data["productName"] = product_name.format(
-            **prepare_template_data({"renderlayer": render_layer_name})
+            **prepare_template_data({
+                "renderlayer": render_layer_name,
+                "renderpass": render_pass_name,
+            })
         )
 
     def _collect_data_for_render_scene(self, instance):

@@ -401,6 +401,7 @@ class CreateRenderPass(TVPaintCreator):
 
     # Settings
     layer_name_template = {"enabled": False}
+    render_pass_template = "{variant}"
     mark_for_review = True
 
     def register_callbacks(self):
@@ -423,6 +424,7 @@ class CreateRenderPass(TVPaintCreator):
         self.default_variant = plugin_settings["default_variant"]
         self.default_variants = plugin_settings["default_variants"]
         self.mark_for_review = plugin_settings["mark_for_review"]
+        self.render_pass_template = plugin_settings["render_pass_template"]
         self.create_allow_context_change = not self._use_current_context
 
     def collect_instances(self):
@@ -439,31 +441,44 @@ class CreateRenderPass(TVPaintCreator):
             )
         }
 
+        layers_data = get_layers_data()
+        layers_count = len(layers_data)
         layers_by_name = collections.defaultdict(list)
-        layers_count = 0
-        if self.layer_name_template["enabled"]:
-            layers_data = get_layers_data()
-            layers_count = len(layers_data)
-            for layer in layers_data:
-                layers_by_name[layer["name"]].append(layer)
+        for layer in layers_data:
+            layers_by_name[layer["name"]].append(layer)
 
         for instance_data in instances_by_identifier[self.identifier]:
+            instance_layers = []
+            layer_names = instance_data.setdefault("layer_names", [])
+            for layer_name in tuple(layer_names):
+                instance_layers.extend(layers_by_name[layer_name])
+
             render_layer_instance_id = (
                 instance_data
                 .get("creator_attributes", {})
                 .get("render_layer_instance_id")
             )
             render_layer_info = render_layers.get(render_layer_instance_id, {})
-            self.update_instance_labels(
-                instance_data,
-                render_layer_info.get("variant"),
-                render_layer_info.get("template_data")
-            )
 
             instance = CreatedInstance.from_existing(instance_data, self)
+
+            layer_pos = 0
+            if instance_layers:
+                max_pos = max(layer["position"] for layer in instance_layers)
+                layer_pos = (layers_count - max_pos) - 1
+
+            instance.transient_data["instance_layers"] = instance_layers
+            instance.transient_data["layers_count"] = layers_count
+            instance.transient_data["layer_pos"] = layer_pos
             self._add_instance_to_context(instance)
             if self._use_current_context:
                 self._update_instance_context(instance)
+
+            self.update_instance_labels(
+                instance,
+                render_layer_info.get("variant"),
+                render_layer_info.get("template_data"),
+            )
 
             self._set_layer_name(
                 instance["variant"],
@@ -489,32 +504,50 @@ class CreateRenderPass(TVPaintCreator):
             host_name,
             instance
         )
-        dynamic_data["renderpass"] = variant
+        dynamic_data["renderpass"] = "{renderpass}"
         dynamic_data["renderlayer"] = "{renderlayer}"
         return dynamic_data
 
     def update_instance_labels(
-        self, instance, render_layer_variant, render_layer_data=None
+        self,
+        instance: CreatedInstance,
+        render_layer_variant: Optional[str],
+        render_layer_data: Optional[str],
     ):
-        old_label = instance.get("label")
-        old_group = instance.get("group")
-        new_label = None
-        new_group = None
-        if render_layer_variant is not None:
-            if render_layer_data is None:
-                render_layer_data = prepare_template_data({
-                    "renderlayer": render_layer_variant
-                })
-            try:
-                new_label = instance["productName"].format(**render_layer_data)
-            except (KeyError, ValueError):
-                pass
+        # Prepare 'renderpass' value
+        pass_data = prepare_template_data({"variant": instance["variant"]})
+        pass_data["layer_pos"] = instance.transient_data["layer_pos"]
+        try:
+            pass_name = self.render_pass_template.format(**pass_data)
+        except (KeyError, ValueError) as exc:
+            self.log.warning(f"Failed to fill render pass name. {exc}")
+            pass_name = "{renderpass}"
 
+        new_group = None
+        if render_layer_variant is None:
+            render_layer_variant = "{renderlayer}"
+        else:
             new_group = f"{self.get_group_label()} ({render_layer_variant})"
+
+        if render_layer_data is None:
+            product_name_data = prepare_template_data({
+                "renderlayer": render_layer_variant,
+            })
+        else:
+            product_name_data = copy.deepcopy(render_layer_data)
+
+        product_name_data.update(
+            prepare_template_data({"renderpass": pass_name})
+        )
+        print(product_name_data, self.render_pass_template)
+
+        try:
+            new_label = instance["productName"].format(**product_name_data)
+        except (KeyError, ValueError):
+            new_label = None
 
         instance["label"] = new_label
         instance["group"] = new_group
-        return old_group != new_group or old_label != new_label
 
     def create(self, product_name, instance_data, pre_create_data):
         render_layer_instance_id = pre_create_data.get(
