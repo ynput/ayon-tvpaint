@@ -37,30 +37,12 @@ class CreateRenderLayerModel(BaseSettingsModel):
 class LayerNameTemplateModel(BaseSettingsModel):
     enabled: bool = SettingsField(False, title="Enabled")
     template: str = SettingsField(
-        "G{group_id:0>3}_L{layer_id:0>3}_{variant}",
+        "G{group_index}_L{layer_index}_{variant}",
         title="Layer name template",
-        description="Available keys '{group_id}' '{layer_id}' '{variant}'",
-        placeholder="G{group_id:0>3}_L{layer_id:0>3}_{variant}",
-    )
-    group_id_start: int = SettingsField(
-        10,
-        title="Group index first value",
-        ge=0,
-    )
-    group_id_increment: int = SettingsField(
-        10,
-        title="Group index increment",
-        ge=1,
-    )
-    layer_id_start: int = SettingsField(
-        10,
-        title="Layer index first value",
-        ge=0,
-    )
-    layer_id_increment: int = SettingsField(
-        10,
-        title="Layer index increment",
-        ge=1,
+        description=(
+            "Available keys '{group_index}' '{layer_index}' '{variant}'"
+        ),
+        placeholder="G{group_index}_L{layer_index}_{variant}",
     )
 
 
@@ -73,13 +55,28 @@ class CreateRenderPassModel(BaseSettingsModel):
     render_pass_template: str = SettingsField(
         "{variant}",
         title="Render pass name template",
-        description="Available keys '{layer_pos}' '{variant}'",
-        placeholder="L{layer_pos:0>3}_{variant}",
+        description="Available keys '{layer_index}' '{variant}'",
+        placeholder="L{layer_index}_{variant}",
     )
     layer_name_template: LayerNameTemplateModel = SettingsField(
         default_factory=LayerNameTemplateModel,
         title="Layer name template",
         description="Automatically change TVPaint layer name using template.",
+    )
+
+    # Template settings section
+    group_idx_offset: int = SettingsField(
+        10, title="Group index Offset", ge=1,
+        section="Template Settings"
+    )
+    group_idx_padding: int = SettingsField(
+        3, title="Group index Padding", ge=0
+    )
+    layer_idx_offset: int = SettingsField(
+        10, title="Layer index Offset", ge=1
+    )
+    layer_idx_padding: int = SettingsField(
+        3, title="Layer index Padding", ge=0
     )
 
 
