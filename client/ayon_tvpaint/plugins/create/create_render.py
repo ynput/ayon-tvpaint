@@ -400,8 +400,12 @@ class CreateRenderPass(TVPaintCreator):
     order = CreateRenderlayer.order + 10
 
     # Settings
-    layer_name_template = {"enabled": False}
     render_pass_template = "{variant}"
+    layer_name_template = {"enabled": False, "template": "{variant}"}
+    group_idx_offset = 10
+    group_idx_padding = 3
+    layer_idx_offset = 10
+    layer_idx_padding = 3
     mark_for_review = True
 
     def register_callbacks(self):
@@ -421,6 +425,10 @@ class CreateRenderPass(TVPaintCreator):
             project_settings["tvpaint"]["create"]["create_render_pass"]
         )
         self.layer_name_template = plugin_settings["layer_name_template"]
+        self.group_idx_offset = plugin_settings["group_idx_offset"]
+        self.group_idx_padding = plugin_settings["group_idx_padding"]
+        self.layer_idx_offset = plugin_settings["layer_idx_offset"]
+        self.layer_idx_padding = plugin_settings["layer_idx_padding"]
         self.default_variant = plugin_settings["default_variant"]
         self.default_variants = plugin_settings["default_variants"]
         self.mark_for_review = plugin_settings["mark_for_review"]
@@ -516,7 +524,17 @@ class CreateRenderPass(TVPaintCreator):
     ):
         # Prepare 'renderpass' value
         pass_data = prepare_template_data({"variant": instance["variant"]})
-        pass_data["layer_pos"] = instance.transient_data["layer_pos"]
+
+        layer_template = "{}"
+        if self.layer_idx_padding:
+            layer_template = f"{{:0>{self.layer_idx_padding}}}"
+
+        layer_index: str = layer_template.format(
+            (instance.transient_data["layer_pos"] + 1)
+            * self.layer_idx_offset
+        )
+
+        pass_data["layer_id"] = layer_index
         try:
             pass_name = self.render_pass_template.format(**pass_data)
         except (KeyError, ValueError) as exc:
@@ -829,10 +847,14 @@ class CreateRenderPass(TVPaintCreator):
             return
 
         template = self.layer_name_template["template"]
-        group_id_start = self.layer_name_template["group_id_start"]
-        group_id_inc = self.layer_name_template["group_id_increment"]
-        layer_id_start = self.layer_name_template["layer_id_start"]
-        layer_id_inc = self.layer_name_template["layer_id_increment"]
+
+        group_template = "{}"
+        if self.group_idx_padding:
+            group_template = f"{{:0>{self.group_idx_padding}}}"
+
+        layer_template = "{}"
+        if self.layer_idx_offset:
+            layer_template = f"{{:0>{self.layer_idx_padding}}}"
 
         for layer_name in tuple(layer_names):
             layers = layers_by_name.get(layer_name)
@@ -840,20 +862,19 @@ class CreateRenderPass(TVPaintCreator):
                 continue
             for layer in layers:
                 # Reverse the position order
-                layer_pos = (layers_count - layer["position"]) - 1
-                group_pos = layer["group_id"] - 1
-                layer_index = layer_id_start + (layer_pos * layer_id_inc)
+                layer_pos = (layers_count - layer["position"])
+                group_pos = layer["group_id"]
+                layer_index = self.layer_idx_offset * layer_pos
                 if group_id is not None:
-                    group_pos = group_id - 1
+                    group_pos = group_id
 
-                group_pos = group_id_start + (group_pos * group_id_inc)
-
+                group_pos = group_pos * self.group_idx_offset
                 new_name = None
                 try:
                     new_name = template.format(
-                        layer_id=layer_index,
-                        group_id=group_pos,
-                        variant=variant
+                        layer_index=layer_template.format(layer_index),
+                        group_index=group_template.format(group_pos),
+                        variant=variant,
                     )
                 except Exception:
                     self.log.warning(
@@ -891,7 +912,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     # Settings
     enabled = False
     allow_group_rename = True
-    group_name_template = "L{group_index}"
+    group_name_template = "G{group_index}"
     group_idx_offset = 10
     group_idx_padding = 3
     layer_name_template = {"enabled": False}
@@ -930,11 +951,14 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
             for group in scene_groups
         }
         # Count only renamed groups
+        group_template = "{}"
+        if self.group_idx_padding:
+            group_template = f"{{:0>{self.group_idx_padding}}}"
+
         for idx, group_id in enumerate(groups_order):
+
             group_index_value: str = (
-                "{{:0>{}}}"
-                .format(self.group_idx_padding)
-                .format((idx + 1) * self.group_idx_offset)
+                group_template.format((idx + 1) * self.group_idx_offset)
             )
             group_name_fill_values: dict[str, str] = {
                 "groupIdx": group_index_value,
