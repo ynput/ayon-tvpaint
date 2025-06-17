@@ -92,21 +92,21 @@ class AutoDetectCreateRenderModel(BaseSettingsModel):
     Group names can be renamed by their used order in scene. The renaming
     template where can be used '{group_index}' formatting key which is
     filled by "used position index of group".
-    - Template: 'L{group_index}'
+    - Template: 'G{group_index}'
     - Group offset: '10'
     - Group padding: '3'
 
-    Would create group names "L010", "L020", ...
+    Would create group names "G010", "G020", ...
     """
 
     enabled: bool = SettingsField(True)
     allow_group_rename: bool = SettingsField(title="Allow group rename")
     group_name_template: str = SettingsField(title="Group name template")
     group_idx_offset: int = SettingsField(
-        1, title="Group index Offset", ge=1
+        10, title="Group index Offset", ge=1
     )
     group_idx_padding: int = SettingsField(
-        4, title="Group index Padding", ge=1
+        3, title="Group index Padding", ge=0
     )
 
 
