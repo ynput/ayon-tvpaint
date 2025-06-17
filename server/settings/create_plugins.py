@@ -176,7 +176,7 @@ DEFAULT_CREATE_SETTINGS = {
     "auto_detect_render": {
         "enabled": False,
         "allow_group_rename": True,
-        "group_name_template": "L{group_index}",
+        "group_name_template": "G{group_index}",
         "group_idx_offset": 10,
         "group_idx_padding": 3
     }
