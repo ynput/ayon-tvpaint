@@ -70,6 +70,12 @@ class CreateRenderPassModel(BaseSettingsModel):
     default_variants: list[str] = SettingsField(
         default_factory=list, title="Default variants"
     )
+    render_pass_template: str = SettingsField(
+        "{variant}",
+        title="Render pass name template",
+        description="Available keys '{layer_pos}' '{variant}'",
+        placeholder="L{layer_pos:0>3}_{variant}",
+    )
     layer_name_template: LayerNameTemplateModel = SettingsField(
         default_factory=LayerNameTemplateModel,
         title="Layer name template",
