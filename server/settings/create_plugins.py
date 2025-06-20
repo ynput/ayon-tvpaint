@@ -37,30 +37,12 @@ class CreateRenderLayerModel(BaseSettingsModel):
 class LayerNameTemplateModel(BaseSettingsModel):
     enabled: bool = SettingsField(False, title="Enabled")
     template: str = SettingsField(
-        "G{group_id:0>3}_L{layer_id:0>3}_{variant}",
+        "G{group_index}_L{layer_index}_{variant}",
         title="Layer name template",
-        description="Available keys '{group_id}' '{layer_id}' '{variant}'",
-        placeholder="G{group_id:0>3}_L{layer_id:0>3}_{variant}",
-    )
-    group_id_start: int = SettingsField(
-        10,
-        title="Group index first value",
-        ge=0,
-    )
-    group_id_increment: int = SettingsField(
-        10,
-        title="Group index increment",
-        ge=1,
-    )
-    layer_id_start: int = SettingsField(
-        10,
-        title="Layer index first value",
-        ge=0,
-    )
-    layer_id_increment: int = SettingsField(
-        10,
-        title="Layer index increment",
-        ge=1,
+        description=(
+            "Available keys '{group_index}' '{layer_index}' '{variant}'"
+        ),
+        placeholder="G{group_index}_L{layer_index}_{variant}",
     )
 
 
@@ -70,10 +52,31 @@ class CreateRenderPassModel(BaseSettingsModel):
     default_variants: list[str] = SettingsField(
         default_factory=list, title="Default variants"
     )
+    render_pass_template: str = SettingsField(
+        "{variant}",
+        title="Render pass name template",
+        description="Available keys '{layer_index}' '{variant}'",
+        placeholder="L{layer_index}_{variant}",
+    )
     layer_name_template: LayerNameTemplateModel = SettingsField(
         default_factory=LayerNameTemplateModel,
         title="Layer name template",
         description="Automatically change TVPaint layer name using template.",
+    )
+
+    # Template settings section
+    group_idx_offset: int = SettingsField(
+        10, title="Group index Offset", ge=1,
+        section="Template Settings"
+    )
+    group_idx_padding: int = SettingsField(
+        3, title="Group index Padding", ge=0
+    )
+    layer_idx_offset: int = SettingsField(
+        10, title="Layer index Offset", ge=1
+    )
+    layer_idx_padding: int = SettingsField(
+        3, title="Layer index Padding", ge=0
     )
 
 
@@ -86,21 +89,21 @@ class AutoDetectCreateRenderModel(BaseSettingsModel):
     Group names can be renamed by their used order in scene. The renaming
     template where can be used '{group_index}' formatting key which is
     filled by "used position index of group".
-    - Template: 'L{group_index}'
+    - Template: 'G{group_index}'
     - Group offset: '10'
     - Group padding: '3'
 
-    Would create group names "L010", "L020", ...
+    Would create group names "G010", "G020", ...
     """
 
     enabled: bool = SettingsField(True)
     allow_group_rename: bool = SettingsField(title="Allow group rename")
     group_name_template: str = SettingsField(title="Group name template")
     group_idx_offset: int = SettingsField(
-        1, title="Group index Offset", ge=1
+        10, title="Group index Offset", ge=1
     )
     group_idx_padding: int = SettingsField(
-        4, title="Group index Padding", ge=1
+        3, title="Group index Padding", ge=0
     )
 
 
@@ -170,7 +173,7 @@ DEFAULT_CREATE_SETTINGS = {
     "auto_detect_render": {
         "enabled": False,
         "allow_group_rename": True,
-        "group_name_template": "L{group_index}",
+        "group_name_template": "G{group_index}",
         "group_idx_offset": 10,
         "group_idx_padding": 3
     }
