@@ -216,8 +216,9 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 channel_names = [f"{product_name}{ch_n}" for ch_n in "RGBA"]
                 args.extend([
                     "-i", path,
-                    "--ch", ",".join(channel_names),
+                    "--chnames", ",".join(channel_names),
                     "--colorconvert", "sRGB", "linear",
+                    "--chappend",
                 ])
 
             output_arg = "-o"
