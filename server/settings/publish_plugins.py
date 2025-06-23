@@ -56,9 +56,9 @@ class ExtractConvertToEXRModel(BaseSettingsModel):
         enum_resolver=compression_enum,
         title="EXR Compression"
     )
-    multilayer_exr: bool = SettingsField(
+    multichannel_exr: bool = SettingsField(
         False,
-        title="Create multilayer EXR",
+        title="Create multichannel EXR",
         description="Merge render passes into a render layer EXR files",
     )
 
