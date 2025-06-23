@@ -89,11 +89,11 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
         else:
             for item in render_layer_items + render_pass_items:
                 instance, src_repre = item
-                self._simple_exc_conversion(
+                self._simple_exr_conversion(
                     instance, src_repre, base_oiio_args
                 )
 
-    def _simple_exc_conversion(self, instance, repre, base_oiio_args):
+    def _simple_exr_conversion(self, instance, repre, base_oiio_args):
         repres = instance.data["representations"]
 
         src_filepaths = set()
