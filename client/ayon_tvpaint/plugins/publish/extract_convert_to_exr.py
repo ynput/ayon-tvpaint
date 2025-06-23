@@ -44,10 +44,13 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
             if instance.data.get("publish") is False:
                 continue
 
-            if (
-                instance.data["family"] != "render"
-                or instance.data.get("farm")
-            ):
+            if instance.data["family"] != "render":
+                continue
+
+            if instance.data.get("farm"):
+                self.log.debug(
+                    "Skipping instance, is marked for farm rendering."
+                )
                 continue
 
             repres = instance.data.get("representations") or []
@@ -60,6 +63,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 None
             )
             if not src_repre:
+                self.log.debug("Skipping instance, no PNG representation.")
                 continue
 
             creator_identifier = instance.data.get("creator_identifier")
