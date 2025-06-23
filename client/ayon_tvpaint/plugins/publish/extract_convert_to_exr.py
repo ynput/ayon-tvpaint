@@ -16,7 +16,7 @@ from ayon_core.lib import (
     ToolNotFoundError,
     run_subprocess,
 )
-from ayon_core.pipeline import KnownPublishError
+from ayon_core.pipeline import PublishError
 
 
 class ExtractConvertToEXR(pyblish.api.ContextPlugin):
@@ -76,7 +76,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
         except ToolNotFoundError:
             # Raise an exception when oiiotool is not available
             # - this can currently happen on MacOS machines
-            raise KnownPublishError(
+            raise PublishError(
                 "OpenImageIO tool is not available on this machine."
             )
 
