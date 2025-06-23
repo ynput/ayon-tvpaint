@@ -213,7 +213,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 pass_staging_dir = pass_repre["stagingDir"]
                 path = os.path.join(pass_staging_dir, pass_filename)
                 # Add the render pass representation
-                channel_names = [f"{product_name}{ch_n}" for ch_n in "RGBA"]
+                channel_names = [f"{product_name}.{ch_n}" for ch_n in "RGBA"]
                 args.extend([
                     "-i", path,
                     "--chnames", ",".join(channel_names),
