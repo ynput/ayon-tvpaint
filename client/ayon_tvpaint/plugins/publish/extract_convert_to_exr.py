@@ -16,7 +16,7 @@ from ayon_core.lib import (
     ToolNotFoundError,
     run_subprocess,
 )
-from ayon_core.pipeline import KnownPublishError
+from ayon_core.pipeline import PublishError
 
 
 class ExtractConvertToEXR(pyblish.api.ContextPlugin):
@@ -33,7 +33,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
     replace_pngs = True
     # EXR compression
     exr_compression = "ZIP"
-    multilayer_exr = False
+    multichannel_exr = False
     auto_trim = True
 
     def process(self, context):
@@ -44,10 +44,13 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
             if instance.data.get("publish") is False:
                 continue
 
-            if (
-                instance.data["family"] != "render"
-                or instance.data.get("farm")
-            ):
+            if instance.data["family"] != "render":
+                continue
+
+            if instance.data.get("farm"):
+                self.log.debug(
+                    "Skipping instance, is marked for farm rendering."
+                )
                 continue
 
             repres = instance.data.get("representations") or []
@@ -60,6 +63,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 None
             )
             if not src_repre:
+                self.log.debug("Skipping instance, no PNG representation.")
                 continue
 
             creator_identifier = instance.data.get("creator_identifier")
@@ -76,12 +80,12 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
         except ToolNotFoundError:
             # Raise an exception when oiiotool is not available
             # - this can currently happen on MacOS machines
-            raise KnownPublishError(
+            raise PublishError(
                 "OpenImageIO tool is not available on this machine."
             )
 
-        if self.multilayer_exr:
-            self._multilayer_exr_conversion(
+        if self.multichannel_exr:
+            self._multichannel_exr_conversion(
                 render_layer_items,
                 render_pass_items,
                 base_oiio_args
@@ -89,11 +93,11 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
         else:
             for item in render_layer_items + render_pass_items:
                 instance, src_repre = item
-                self._simple_exc_conversion(
+                self._simple_exr_conversion(
                     instance, src_repre, base_oiio_args
                 )
 
-    def _simple_exc_conversion(self, instance, repre, base_oiio_args):
+    def _simple_exr_conversion(self, instance, repre, base_oiio_args):
         repres = instance.data["representations"]
 
         src_filepaths = set()
@@ -136,7 +140,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
             for filepath in src_filepaths:
                 instance.context.data["cleanupFullPaths"].append(filepath)
 
-    def _multilayer_exr_conversion(
+    def _multichannel_exr_conversion(
         self,
         render_layer_items,
         render_pass_items,
@@ -213,11 +217,12 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 pass_staging_dir = pass_repre["stagingDir"]
                 path = os.path.join(pass_staging_dir, pass_filename)
                 # Add the render pass representation
-                channel_names = [f"{product_name}{ch_n}" for ch_n in "RGBA"]
+                channel_names = [f"{product_name}.{ch_n}" for ch_n in "RGBA"]
                 args.extend([
                     "-i", path,
-                    "--ch", ",".join(channel_names),
+                    "--chnames", ",".join(channel_names),
                     "--colorconvert", "sRGB", "linear",
+                    "--chappend",
                 ])
 
             output_arg = "-o"
