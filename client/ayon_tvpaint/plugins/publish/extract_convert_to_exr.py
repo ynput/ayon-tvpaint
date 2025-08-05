@@ -229,6 +229,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
 
             args.extend([
                 "--compression", self.exr_compression,
+                "-d", "uint8",
                 output_arg, dst_path,
             ])
             self.log.debug("Running oiiotool with args: %s", args)
