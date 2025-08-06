@@ -165,8 +165,8 @@ class ExtractConvertToEXR(
             args = copy.deepcopy(base_oiio_args)
             args.extend([
                 src_filepath,
-                "--colorconvert", "sRGB", "linear",
                 "--compression", self.exr_compression,
+                "-d", "uint8",
                 output_arg, dst_filepath
             ])
             run_subprocess(args)
@@ -251,7 +251,6 @@ class ExtractConvertToEXR(
             args.extend([
                 "-i", src_beauty_path,
                 "--ch", "R,G,B,A",
-                "--colorconvert", "sRGB", "linear",
             ])
 
             for (render_pass_instance, pass_repre) in render_pass_items:
@@ -268,7 +267,6 @@ class ExtractConvertToEXR(
                 args.extend([
                     "-i", path,
                     "--chnames", ",".join(channel_names),
-                    "--colorconvert", "sRGB", "linear",
                     "--chappend",
                 ])
 
@@ -278,6 +276,7 @@ class ExtractConvertToEXR(
 
             args.extend([
                 "--compression", self.exr_compression,
+                "-d", "uint8",
                 output_arg, dst_path,
             ])
             self.log.debug("Running oiiotool with args: %s", args)
