@@ -16,10 +16,15 @@ from ayon_core.lib import (
     ToolNotFoundError,
     run_subprocess,
 )
+from ayon_core.lib.attribute_definitions import BoolDef
 from ayon_core.pipeline import PublishError
+from ayon_core.pipeline.publish import AYONPyblishPluginMixin
 
 
-class ExtractConvertToEXR(pyblish.api.ContextPlugin):
+class ExtractConvertToEXR(
+    pyblish.api.ContextPlugin,
+    AYONPyblishPluginMixin
+):
     # Offset to get after ExtractSequence plugin.
     order = pyblish.api.ExtractorOrder + 0.1
     label = "Extract Sequence EXR"
@@ -37,8 +42,39 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
     multichannel_exr = False
 
     keep_passes = False
+    user_overrides = []
+
+    @classmethod
+    def get_attr_defs_for_context(cls, context):
+        attr_defs = []
+        if "create_exr" in cls.user_overrides:
+            attr_defs.append(BoolDef(
+                "create_exr",
+                label="Create EXRs",
+                default=True,
+                tooltip="Render EXRs instead of PNGs",
+            ))
+
+        if "keep_passes" in cls.user_overrides:
+            attr_defs.append(BoolDef(
+                "keep_passes",
+                label="Keep render passes",
+                default=cls.keep_passes,
+                visible=cls.multichannel_exr,
+                tooltip="Keep render passes after conversion",
+            ))
+
+        return attr_defs
 
     def process(self, context):
+        attr_values = self.get_attr_values_from_data(context.data)
+        if "create_exr" in self.user_overrides:
+            if not attr_values["create_exr"]:
+                self.log.info(
+                    "EXR conversion is disabled with attributes. Skipping..."
+                )
+                return
+
         render_layer_items = []
         render_pass_items = []
 
@@ -97,6 +133,8 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 base_oiio_args
             )
             keep_passes = self.keep_passes
+            if "keep_passes" in self.user_overrides:
+                keep_passes = attr_values["keep_passes"]
             if keep_passes:
                 simple_exr_items = render_pass_items
 

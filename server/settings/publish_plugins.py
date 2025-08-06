@@ -39,6 +39,13 @@ def compression_enum():
     ]
 
 
+def user_exr_choices():
+    return [
+        {"value": "create_exr", "label": "Create EXR"},
+        {"value": "keep_passes", "label": "Keep render passes"},
+    ]
+
+
 class ExtractConvertToEXRModel(BaseSettingsModel):
     """WARNING: This plugin does not work on MacOS (using OIIO tool)."""
     enabled: bool = False
@@ -65,6 +72,12 @@ class ExtractConvertToEXRModel(BaseSettingsModel):
         False,
         title="Keep render pass products with multichannel EXR",
         description="Keep render passes even though multichannel EXR is enabled",
+    )
+    user_overrides: list[str] = SettingsField(
+        default_factory=list,
+        title="User overrides",
+        description="Allow user to change the plugin functionality",
+        enum_resolver=user_exr_choices,
     )
 
 
