@@ -71,7 +71,7 @@ class ExtractConvertToEXRModel(BaseSettingsModel):
     )
     keep_passes: bool = SettingsField(
         False,
-        title="Keep render pass products with multichannel EXR",
+        title="Keep render passes",
         description="Keep render passes even though multichannel EXR is enabled",
     )
     user_overrides: list[str] = SettingsField(
