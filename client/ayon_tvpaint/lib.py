@@ -543,9 +543,12 @@ def cleanup_rendered_layers(filepaths_by_layer_id):
 
 
 def composite_rendered_layers(
-    layers_data, filepaths_by_layer_id,
-    range_start, range_end,
-    dst_filepaths_by_frame, cleanup=True
+    layers_data,
+    filepaths_by_layer_id,
+    range_start,
+    range_end,
+    dst_filepaths_by_frame,
+    cleanup=True,
 ):
     """Composite multiple rendered layers by their position.
 
@@ -566,6 +569,7 @@ def composite_rendered_layers(
             image after compositing will be stored. Path must not clash with
             source filepaths.
         cleanup(bool): Remove all source filepaths when done with compositing.
+
     """
     # Prepare layers by their position
     #   - position tells in which order will compositing happen
