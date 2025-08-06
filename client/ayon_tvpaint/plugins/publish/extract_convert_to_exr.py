@@ -118,7 +118,6 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
             args = copy.deepcopy(base_oiio_args)
             args.extend([
                 src_filepath,
-                "--colorconvert", "sRGB", "linear",
                 "--compression", self.exr_compression,
                 output_arg, dst_filepath
             ])
