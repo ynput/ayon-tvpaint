@@ -412,24 +412,6 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 }
             )
             context = render_layer_instance.context
-            # Remove render pass instances from the context
-            # - Remove all files of all render pass representations and then
-            #   the instances.
-            for (render_pass_instance, _) in render_pass_items:
-                if keep_passes:
-                    break
-                render_pass_instance.data["publish"] = False
-                for repre in render_pass_instance.data["representations"]:
-                    staging_dir = repre["stagingDir"]
-                    filenames = repre["files"]
-                    if not isinstance(filenames, list):
-                        filenames = [filenames]
-                    src_filepaths = [
-                        os.path.join(staging_dir, filename)
-                        for filename in filenames
-                    ]
-                    context.data["cleanupFullPaths"].extend(src_filepaths)
-                context.remove(render_pass_instance)
 
             # Remove the source representation of the render layer
             if self.replace_pngs:
@@ -443,3 +425,23 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                     for filename in filenames
                 ]
                 context.data["cleanupFullPaths"].extend(src_filepaths)
+
+            if keep_passes:
+                continue
+
+            # Remove render pass instances from the context
+            # - Remove all files of all render pass representations and then
+            #   the instances.
+            for (render_pass_instance, _) in render_pass_items:
+                render_pass_instance.data["publish"] = False
+                for repre in render_pass_instance.data["representations"]:
+                    staging_dir = repre["stagingDir"]
+                    filenames = repre["files"]
+                    if not isinstance(filenames, list):
+                        filenames = [filenames]
+                    src_filepaths = [
+                        os.path.join(staging_dir, filename)
+                        for filename in filenames
+                    ]
+                    context.data["cleanupFullPaths"].extend(src_filepaths)
+                context.remove(render_pass_instance)
