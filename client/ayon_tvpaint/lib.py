@@ -499,7 +499,7 @@ def create_transparent_image_from_source(src_filepath, dst_filepath):
     """Create transparent image of same type and size as source image."""
     img_obj = Image.open(src_filepath)
     painter = ImageDraw.Draw(img_obj)
-    painter.rectangle((0, 0, *img_obj.size), fill=(0, 0, 0, 0))
+    painter.rectangle((0, 0, *img_obj.size), fill=(255, 255, 255, 0))
     img_obj.save(dst_filepath)
 
 
