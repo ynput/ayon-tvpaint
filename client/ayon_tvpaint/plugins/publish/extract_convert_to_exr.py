@@ -32,9 +32,11 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
     # Replace source PNG files or just add
     replace_pngs = True
     # EXR compression
+    auto_trim = True
     exr_compression = "ZIP"
     multichannel_exr = False
-    auto_trim = True
+
+    keep_passes = False
 
     def process(self, context):
         render_layer_items = []
@@ -84,18 +86,25 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
                 "OpenImageIO tool is not available on this machine."
             )
 
+        simple_exr_items = []
+        if not self.multichannel_exr:
+            simple_exr_items = render_layer_items + render_pass_items
+
         if self.multichannel_exr:
             self._multichannel_exr_conversion(
                 render_layer_items,
                 render_pass_items,
                 base_oiio_args
             )
-        else:
-            for item in render_layer_items + render_pass_items:
-                instance, src_repre = item
-                self._simple_exr_conversion(
-                    instance, src_repre, base_oiio_args
-                )
+            keep_passes = self.keep_passes
+            if keep_passes:
+                simple_exr_items = render_pass_items
+
+        for item in simple_exr_items:
+            instance, src_repre = item
+            self._simple_exr_conversion(
+                instance, src_repre, base_oiio_args
+            )
 
     def _simple_exr_conversion(self, instance, repre, base_oiio_args):
         repres = instance.data["representations"]

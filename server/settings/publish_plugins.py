@@ -61,6 +61,11 @@ class ExtractConvertToEXRModel(BaseSettingsModel):
         title="Create multichannel EXR",
         description="Merge render passes into a render layer EXR files",
     )
+    keep_passes: bool = SettingsField(
+        False,
+        title="Keep render pass products with multichannel EXR",
+        description="Keep render passes even though multichannel EXR is enabled",
+    )
 
 
 class LoadImageDefaultModel(BaseSettingsModel):
