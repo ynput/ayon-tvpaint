@@ -119,6 +119,7 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
             args.extend([
                 src_filepath,
                 "--compression", self.exr_compression,
+                "-d", "uint8",
                 output_arg, dst_filepath
             ])
             run_subprocess(args)
