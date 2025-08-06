@@ -111,7 +111,7 @@ class LoadPluginsModel(BaseSettingsModel):
 
 DEFAULT_PUBLISH_SETTINGS = {
     "CollectRenderInstances": {
-        "ignore_render_pass_transparency": False
+        "ignore_render_pass_transparency": True
     },
     "ExtractSequence": {
         # "review_bg": [255, 255, 255]
