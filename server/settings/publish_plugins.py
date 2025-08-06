@@ -42,6 +42,7 @@ def compression_enum():
 def user_exr_choices():
     return [
         {"value": "create_exr", "label": "Create EXR"},
+        {"value": "multichannel_exr", "label": "Create multichannel EXR"},
         {"value": "keep_passes", "label": "Keep render passes"},
     ]
 
