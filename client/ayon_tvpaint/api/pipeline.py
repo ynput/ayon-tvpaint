@@ -571,7 +571,7 @@ def set_context_settings(context_entity, filepath):
     handle_end = attributes.get("handleEnd") or 0
 
     # Use current Mark In and set only Mark Out
-    mark_in_frame, mark_in_state, _ = execute_george("tv_markin").split(" ")
+    mark_in_frame, _mark_in_state, _ = execute_george("tv_markin").split(" ")
     mark_in = int(mark_in_frame)
     mark_out = mark_in + (frame_end - frame_start) + handle_start + handle_end
 
