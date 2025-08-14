@@ -109,6 +109,7 @@ to top.
 """
 )
 
+
 class CreateRenderlayer(TVPaintCreator):
     """Mark layer group as Render layer instance.
 
@@ -469,7 +470,6 @@ class CreateRenderPass(TVPaintCreator):
             render_layer_info = render_layers.get(render_layer_instance_id, {})
 
             instance = CreatedInstance.from_existing(instance_data, self)
-
 
             instance.transient_data["instance_layers"] = instance_layers
             instance.transient_data["layers_count"] = layers_count
@@ -951,7 +951,6 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
         self.group_idx_padding = plugin_settings["group_idx_padding"]
         self.create_allow_context_change = not self._use_current_context
 
-
         render_pass_settings = (
             project_settings["tvpaint"]["create"]["create_render_pass"]
         )
@@ -1101,9 +1100,9 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
                 name_regex = ""
 
             for src, regex in (
-                (fake_group, "(?P<group>\d+)"),
-                (fake_layer, "(?P<layer>\d+)"),
-                (fake_variant, "(?P<variant>.*)"),
+                (fake_group, r"(?P<group>\d+)"),
+                (fake_layer, r"(?P<layer>\d+)"),
+                (fake_variant, r"(?P<variant>.*)"),
             ):
                 name_regex = name_regex.replace(src, regex)
             name_regex = re.compile(name_regex)

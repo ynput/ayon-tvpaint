@@ -20,7 +20,7 @@ class CollectWorkfile(pyblish.api.InstancePlugin):
         )
 
         dirpath, filename = os.path.split(current_file)
-        basename, ext = os.path.splitext(filename)
+        _, ext = os.path.splitext(filename)
 
         instance.data["representations"].append({
             "name": ext.lstrip("."),

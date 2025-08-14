@@ -81,7 +81,7 @@ class CreateRenderPassModel(BaseSettingsModel):
 
 
 class AutoDetectCreateRenderModel(BaseSettingsModel):
-    """The creator tries to auto-detect Render Layers and Render Passes in scene.
+    """The creator to auto-detect Render Layers and Render Passes in scene.
 
     For Render Layers is used group name as a variant and for Render Passes is
     used TVPaint layer name.

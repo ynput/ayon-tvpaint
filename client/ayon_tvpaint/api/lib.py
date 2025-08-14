@@ -40,7 +40,7 @@ def parse_layers_data(data):
         if not layer_raw:
             continue
         (
-            layer_id, group_id, visible, position, opacity, name,
+            layer_id, group_id, visible, position, _opacity, name,
             layer_type,
             frame_start, frame_end, prelighttable, postlighttable,
             selected, editable, sencil_state, is_current
