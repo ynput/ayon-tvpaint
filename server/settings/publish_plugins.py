@@ -39,6 +39,14 @@ def compression_enum():
     ]
 
 
+def user_exr_choices():
+    return [
+        {"value": "create_exr", "label": "Create EXR"},
+        {"value": "multichannel_exr", "label": "Create multichannel EXR"},
+        {"value": "keep_passes", "label": "Keep render passes"},
+    ]
+
+
 class ExtractConvertToEXRModel(BaseSettingsModel):
     """WARNING: This plugin does not work on MacOS (using OIIO tool)."""
     enabled: bool = False
@@ -60,6 +68,19 @@ class ExtractConvertToEXRModel(BaseSettingsModel):
         False,
         title="Create multichannel EXR",
         description="Merge render passes into a render layer EXR files",
+    )
+    keep_passes: bool = SettingsField(
+        False,
+        title="Keep render passes",
+        description=(
+            "Keep render passes even though multichannel EXR is enabled"
+        ),
+    )
+    user_overrides: list[str] = SettingsField(
+        default_factory=list,
+        title="User overrides",
+        description="Allow user to change the plugin functionality",
+        enum_resolver=user_exr_choices,
     )
 
 
@@ -111,7 +132,7 @@ class LoadPluginsModel(BaseSettingsModel):
 
 DEFAULT_PUBLISH_SETTINGS = {
     "CollectRenderInstances": {
-        "ignore_render_pass_transparency": False
+        "ignore_render_pass_transparency": True
     },
     "ExtractSequence": {
         # "review_bg": [255, 255, 255]

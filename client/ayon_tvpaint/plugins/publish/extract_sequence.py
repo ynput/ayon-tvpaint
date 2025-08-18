@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import os
 import copy
 import tempfile
+from typing import Any
 
 from PIL import Image
 
@@ -336,12 +339,21 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             mark_in,
             mark_out
         )
+
         # Render layers
         filepaths_by_layer_id = {}
         for layer_id, render_data in extraction_data_by_layer_id.items():
             layer = layers_by_id[layer_id]
+            transparency = 1.0
+            if not ignore_layer_opacity:
+                # The only way how to get current transparency is to set new
+                #   value which returns previous value.
+                transparency_int = int(execute_george("tv_layerdensity 100"))
+                execute_george(f"tv_layerdensity {transparency_int}")
+                transparency = float(transparency_int) / 100.0
+
             filepaths_by_layer_id[layer_id] = self._render_layer(
-                render_data, layer, output_dir, ignore_layer_opacity
+                render_data, layer, output_dir, transparency
             )
 
         # Prepare final filepaths where compositing should store result
@@ -359,9 +371,11 @@ class ExtractSequence(pyblish.api.InstancePlugin):
 
         self.log.info("Started compositing of layer frames.")
         composite_rendered_layers(
-            layers, filepaths_by_layer_id,
-            mark_in, mark_out,
-            output_filepaths_by_frame
+            layers,
+            filepaths_by_layer_id,
+            mark_in,
+            mark_out,
+            output_filepaths_by_frame,
         )
 
         self.log.info("Compositing finished")
@@ -399,25 +413,24 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         return (red, green, blue)
 
     def _render_layer(
-        self, render_data, layer, output_dir, ignore_layer_opacity
+        self,
+        render_data: dict[str, Any],
+        layer: dict[str, Any],
+        output_dir: str,
+        transparency: float,
     ):
         frame_references = render_data["frame_references"]
         filenames_by_frame_index = render_data["filenames_by_frame_index"]
 
         layer_id = layer["layer_id"]
         george_script_lines = [
-            "tv_layerset {}".format(layer_id),
+            f"tv_layerset {layer_id}",
             "tv_SaveMode \"PNG\""
         ]
-        # Set density to 100 and store previous opacity
-        if ignore_layer_opacity:
-            george_script_lines.extend([
-                "tv_layerdensity 100",
-                "orig_opacity = result",
-            ])
 
         filepaths_by_frame = {}
         frames_to_render = []
+        rendered_filepaths = set()
         for frame_idx, ref_idx in frame_references.items():
             # None reference is skipped because does not have source
             if ref_idx is None:
@@ -430,20 +443,26 @@ class ExtractSequence(pyblish.api.InstancePlugin):
                 continue
 
             frames_to_render.append(str(frame_idx))
+            rendered_filepaths.add(dst_path)
             # Go to frame
-            george_script_lines.append("tv_layerImage {}".format(frame_idx))
+            george_script_lines.append(f"tv_layerImage {frame_idx}")
             # Store image to output
-            george_script_lines.append("tv_saveimage \"{}\"".format(dst_path))
-
-        # Set density back to origin opacity
-        if ignore_layer_opacity:
-            george_script_lines.append("tv_layerdensity orig_opacity")
+            george_script_lines.append(f"tv_saveimage \"{dst_path}\"")
 
         self.log.debug("Rendering Exposure frames {} of layer {} ({})".format(
             ",".join(frames_to_render), layer_id, layer["name"]
         ))
         # Let TVPaint render layer's image
         execute_george_through_file("\n".join(george_script_lines))
+
+        # Apply layer opacity
+        if transparency != 1.0:
+            for filepath in rendered_filepaths:
+                img = Image.open(filepath)
+                r, g, b, a = img.split()
+                a = a.point(lambda i: i * transparency)
+                img = Image.merge("RGBA", (r, g, b, a))
+                img.save(filepath)
 
         # Fill frames between `frame_start_index` and `frame_end_index`
         self.log.debug("Filling frames not rendered frames.")
