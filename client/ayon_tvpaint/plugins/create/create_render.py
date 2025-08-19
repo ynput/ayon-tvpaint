@@ -176,6 +176,25 @@ class CreateRenderlayer(TVPaintCreator):
         self.log.debug("Query data from workfile.")
 
         group_name = instance_data["variant"]
+
+        if self._use_current_context:
+            project_name = self.create_context.get_current_project_name()
+            folder_entity = self.create_context.get_current_folder_entity()
+            task_entity = self.create_context.get_current_task_entity()
+            project_entity = self.create_context.get_current_project_entity()
+
+            product_name = self.get_product_name(
+                project_name,
+                folder_entity,
+                task_entity,
+                variant=group_name,
+                project_entity=project_entity,
+            )
+
+            instance_data["folderPath"] = folder_entity["path"]
+            instance_data["task"] = task_entity["name"]
+            instance_data["productName"] = product_name
+
         group_id = pre_create_data.get("group_id")
         # This creator should run only on one group
         if group_id is None or group_id == -1:
@@ -206,9 +225,9 @@ class CreateRenderlayer(TVPaintCreator):
                 ))
 
         self.log.debug(f"Selected group id is \"{group_id}\".")
-        if "creator_attributes" not in instance_data:
-            instance_data["creator_attributes"] = {}
-        creator_attributes = instance_data["creator_attributes"]
+        creator_attributes = instance_data.setdefault(
+            "creator_attributes", {}
+        )
         mark_for_review = pre_create_data.get("mark_for_review")
         if mark_for_review is None:
             mark_for_review = self.mark_for_review
@@ -572,6 +591,24 @@ class CreateRenderPass(TVPaintCreator):
                 f" by id \"{render_layer_instance_id}\""
             ))
 
+        if self._use_current_context:
+            project_name = self.create_context.get_current_project_name()
+            folder_entity = self.create_context.get_current_folder_entity()
+            task_entity = self.create_context.get_current_task_entity()
+            project_entity = self.create_context.get_current_project_entity()
+
+            product_name = self.get_product_name(
+                project_name,
+                folder_entity,
+                task_entity,
+                variant=instance_data["variant"],
+                project_entity=project_entity,
+            )
+
+            instance_data["folderPath"] = folder_entity["path"]
+            instance_data["task"] = task_entity["name"]
+            instance_data["productName"] = product_name
+
         group_id = render_layer_instance["creator_attributes"]["group_id"]
         self.log.debug("Query data from workfile.")
         layers_data = get_layers_data()
@@ -654,10 +691,10 @@ class CreateRenderPass(TVPaintCreator):
         instance_data["label"] = label
         instance_data["group"] = f"{self.get_group_label()} ({render_layer})"
         instance_data["layer_names"] = marked_layer_names
-        if "creator_attributes" not in instance_data:
-            instance_data["creator_attributes"] = {}
 
-        creator_attributes = instance_data["creator_attributes"]
+        creator_attributes = instance_data.setdefault(
+            "creator_attributes", {}
+        )
         mark_for_review = pre_create_data.get("mark_for_review")
         if mark_for_review is None:
             mark_for_review = self.mark_for_review
