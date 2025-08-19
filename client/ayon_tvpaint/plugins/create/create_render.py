@@ -1092,11 +1092,14 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
             fake_variant = "___variant___"
             try:
                 name_regex = template.format(
-                    layer_id=fake_layer,
-                    group_id=fake_group,
+                    layer_index=fake_layer,
+                    group_index=fake_group,
                     variant=fake_variant,
                 )
             except Exception:
+                self.log.error(
+                    "Failed to fill name regex template.", exc_info=True
+                )
                 name_regex = ""
 
             for src, regex in (
