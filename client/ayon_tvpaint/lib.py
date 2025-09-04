@@ -517,7 +517,7 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
         src_filepath = filepaths_by_frame[ref_idx]
         dst_filepath = filepaths_by_frame[frame_idx]
 
-        # this is to avoid error on Windows when too many hardlinks are
+        # This is to avoid errors on Windows when too many hardlinks are
         # created with longer sequences (more than 1024). We fall back to
         # copy in that case.
 
