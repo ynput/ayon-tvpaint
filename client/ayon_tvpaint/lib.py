@@ -526,7 +526,7 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
                 try:
                     os.link(src_filepath, dst_filepath)
                 except OSError as e:
-                    if e.winerror != 1142:
+                    if getattr(e, 'winerror', None) != 1142:
                         raise
                     # An attempt was made to create more links on a file
                     # than the file system supports
