@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 import collections
 from PIL import Image, ImageDraw
@@ -505,6 +506,7 @@ def create_transparent_image_from_source(src_filepath, dst_filepath):
 
 def fill_reference_frames(frame_references, filepaths_by_frame):
     # Store path to first transparent image if there is any
+    _can_link = True
     for frame_idx, ref_idx in frame_references.items():
         # Frame referencing to self should be rendered and used as source
         #   and reference indexes with None can't be filled
@@ -515,8 +517,24 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
         src_filepath = filepaths_by_frame[ref_idx]
         dst_filepath = filepaths_by_frame[frame_idx]
 
-        if hasattr(os, "link"):
-            os.link(src_filepath, dst_filepath)
+        # this is to avoid error on Windows when too many hardlinks are
+        # created with longer sequences (more than 1024). We fall back to
+        # copy in that case.
+
+        if hasattr(os, "link") and _can_link:
+            if platform.system().lower() == "windows":
+                try:
+                    os.link(src_filepath, dst_filepath)
+                except OSError as e:
+                    if e.winerror != 1142:
+                        raise
+                    # An attempt was made to create more links on a file
+                    # than the file system supports
+                    #   - fallback to copy
+                    shutil.copy(src_filepath, dst_filepath)
+                    _can_link = False
+            else:
+                os.link(src_filepath, dst_filepath)
         else:
             shutil.copy(src_filepath, dst_filepath)
 
