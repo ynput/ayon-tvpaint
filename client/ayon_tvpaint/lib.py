@@ -515,9 +515,21 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
         src_filepath = filepaths_by_frame[ref_idx]
         dst_filepath = filepaths_by_frame[frame_idx]
 
-        if hasattr(os, "link"):
+        # This is to avoid errors on Windows when too many hardlinks are
+        # created with longer sequences (more than 1024). We fall back to
+        # copy in that case.
+
+        if not hasattr(os, "link"):
+            shutil.copy(src_filepath, dst_filepath)
+            continue
+
+        try:
             os.link(src_filepath, dst_filepath)
-        else:
+        except Exception as exc:
+            # Catch windows error when file has too many links
+            #   - fallback to copy in that case
+            if getattr(exc, "winerror", None) != 1142:
+                raise
             shutil.copy(src_filepath, dst_filepath)
 
 
