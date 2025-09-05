@@ -521,21 +521,17 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
         # created with longer sequences (more than 1024). We fall back to
         # copy in that case.
 
-        if hasattr(os, "link") and _can_link:
-            if platform.system().lower() == "windows":
-                try:
-                    os.link(src_filepath, dst_filepath)
-                except OSError as e:
-                    if getattr(e, 'winerror', None) != 1142:
-                        raise
-                    # An attempt was made to create more links on a file
-                    # than the file system supports
-                    #   - fallback to copy
-                    shutil.copy(src_filepath, dst_filepath)
-                    _can_link = False
-            else:
-                os.link(src_filepath, dst_filepath)
-        else:
+        if not hasattr(os, "link"):
+            shutil.copy(src_filepath, dst_filepath)
+            continue
+
+        try:
+            os.link(src_filepath, dst_filepath)
+        except Exception as exc:
+            # Catch windows error when file has too many links
+            #   - fallback to copy in that case
+            if getattr(exc, "winerror", None) != 1142:
+                raise
             shutil.copy(src_filepath, dst_filepath)
 
 
