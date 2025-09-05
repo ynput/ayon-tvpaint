@@ -1,5 +1,4 @@
 import os
-import platform
 import shutil
 import collections
 from PIL import Image, ImageDraw
