@@ -506,7 +506,6 @@ def create_transparent_image_from_source(src_filepath, dst_filepath):
 
 def fill_reference_frames(frame_references, filepaths_by_frame):
     # Store path to first transparent image if there is any
-    _can_link = True
     for frame_idx, ref_idx in frame_references.items():
         # Frame referencing to self should be rendered and used as source
         #   and reference indexes with None can't be filled
