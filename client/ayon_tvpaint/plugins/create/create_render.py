@@ -184,11 +184,11 @@ class CreateRenderlayer(TVPaintCreator):
             project_entity = self.create_context.get_current_project_entity()
 
             product_name = self.get_product_name(
-                project_name,
-                folder_entity,
-                task_entity,
-                variant=group_name,
+                project_name=project_name,
                 project_entity=project_entity,
+                folder_entity=folder_entity,
+                task_entity=task_entity,
+                variant=group_name,
             )
 
             instance_data["folderPath"] = folder_entity["path"]
@@ -598,11 +598,11 @@ class CreateRenderPass(TVPaintCreator):
             project_entity = self.create_context.get_current_project_entity()
 
             product_name = self.get_product_name(
-                project_name,
-                folder_entity,
-                task_entity,
-                variant=instance_data["variant"],
+                project_name=project_name,
                 project_entity=project_entity,
+                folder_entity=folder_entity,
+                task_entity=task_entity,
+                variant=instance_data["variant"],
             )
 
             instance_data["folderPath"] = folder_entity["path"]
@@ -1075,10 +1075,10 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
             self.create_context.creators[CreateRenderlayer.identifier]
         )
         product_name: str = creator.get_product_name(
-            project_entity["name"],
-            folder_entity,
-            task_entity,
-            variant,
+            project_name=project_entity["name"],
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            variant=variant,
             host_name=self.create_context.host_name,
             project_entity=project_entity,
         )
@@ -1164,10 +1164,10 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
                 variant = layer_name
 
             product_name = creator.get_product_name(
-                project_entity["name"],
-                folder_entity,
-                task_entity,
-                variant,
+                project_name=project_entity["name"],
+                folder_entity=folder_entity,
+                task_entity=task_entity,
+                variant=variant,
                 host_name=self.create_context.host_name,
                 instance=render_pass,
                 project_entity=project_entity,
@@ -1407,11 +1407,11 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
         task_entity = create_context.get_current_task_entity()
 
         product_name = self.get_product_name(
-            project_name,
-            folder_entity,
-            task_entity,
-            self.default_variant,
-            host_name,
+            project_name=project_name,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            variant=self.default_variant,
+            host_name=host_name,
         )
         data = {
             "folderPath": folder_entity["path"],
@@ -1464,12 +1464,12 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
                 folder_path, task_name
             )
             product_name = self.get_product_name(
-                project_name,
-                folder_entity,
-                task_entity,
-                existing_instance["variant"],
-                host_name,
-                existing_instance
+                project_name=project_name,
+                folder_entity=folder_entity,
+                task_entity=task_entity,
+                variant=existing_instance["variant"],
+                host_name=host_name,
+                instance=existing_instance,
             )
             existing_instance["folderPath"] = folder_path
             existing_instance["task"] = task_name
