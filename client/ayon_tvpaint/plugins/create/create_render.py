@@ -472,12 +472,13 @@ class CreateRenderPass(TVPaintCreator):
 
         layers_data = get_layers_data()
         layers_by_name = collections.defaultdict(list)
-        layer_names_by_group_id = collections.defaultdict(list)
+        layers_by_group_id = collections.defaultdict(list)
         for layer in layers_data:
             layers_by_name[layer["name"]].append(layer)
-            layer_names_by_group_id[layer["group_id"]].append(layer["name"])
+            layers_by_group_id[layer["group_id"]].append(layer)
 
-        for instance_data in instances_by_identifier[self.identifier]:
+        instances = instances_by_identifier[self.identifier]
+        for instance_data in instances:
             instance_layers = []
             layer_names = instance_data.setdefault("layer_names", [])
             for layer_name in layer_names:
@@ -488,29 +489,32 @@ class CreateRenderPass(TVPaintCreator):
                 .get("creator_attributes", {})
                 .get("render_layer_instance_id")
             )
-            render_layer_info = render_layers.get(render_layer_instance_id, {})
+            render_layer_info = render_layers.get(
+                render_layer_instance_id, {}
+            )
 
             instance = CreatedInstance.from_existing(instance_data, self)
 
             instance.transient_data["instance_layers"] = instance_layers
+
             self._add_instance_to_context(instance)
             if self._use_current_context:
                 self._update_instance_context(instance)
-
-            self.update_instance_labels(
-                instance,
-                instance_layers,
-                layer_names_by_group_id,
-                render_layer_info.get("group_id"),
-                render_layer_info.get("variant"),
-                render_layer_info.get("template_data"),
-            )
 
             self._set_layer_name(
                 instance["variant"],
                 instance["layer_names"],
                 layers_by_name,
-                layer_names_by_group_id,
+                layers_by_group_id,
+            )
+
+            self.update_instance_labels(
+                instance,
+                instance_layers,
+                layers_by_group_id,
+                render_layer_info.get("group_id"),
+                render_layer_info.get("variant"),
+                render_layer_info.get("template_data"),
             )
 
     def get_dynamic_data(
@@ -538,7 +542,7 @@ class CreateRenderPass(TVPaintCreator):
         self,
         instance: CreatedInstance,
         instance_layers: list[dict[str, Any]],
-        layer_names_by_group_id: dict[str, list[str]],
+        layers_by_group_id: dict[str, list[str]],
         group_id: Optional[int],
         render_layer_variant: Optional[str],
         render_layer_data: Optional[dict[str, Any]],
@@ -560,7 +564,7 @@ class CreateRenderPass(TVPaintCreator):
         render_pass_name = self._get_render_pass_name(
             instance_layers,
             instance["variant"],
-            layer_names_by_group_id,
+            layers_by_group_id,
             group_id,
         )
         product_name_data.update(
@@ -617,23 +621,22 @@ class CreateRenderPass(TVPaintCreator):
         layers_data = get_layers_data()
 
         layers_by_name = collections.defaultdict(list)
-        layer_names_by_group_id = collections.defaultdict(list)
+        layers_by_group_id = collections.defaultdict(list)
         for layer in layers_data:
             layers_by_name[layer["name"]].append(layer)
-            layer_names_by_group_id[layer["group_id"]].append(layer["name"])
+            layers_by_group_id[layer["group_id"]].append(layer)
 
         self.log.debug("Checking selection.")
         # Get all selected layers and their group ids
         marked_layer_names = pre_create_data.get("layer_names")
         if marked_layer_names is not None:
-            layers_by_name = {layer["name"]: layer for layer in layers_data}
             marked_layers = []
             for layer_name in marked_layer_names:
-                layer = layers_by_name.get(layer_name)
-                if layer is None:
+                layers = layers_by_name.get(layer_name)
+                if not layers:
                     raise CreatorError(
                         f"Layer with name \"{layer_name}\" was not found")
-                marked_layers.append(layer)
+                marked_layers.extend(layers)
 
         else:
             marked_layers = [
@@ -647,15 +650,21 @@ class CreateRenderPass(TVPaintCreator):
                 raise CreatorError(
                     "Nothing is selected. Please select layers.")
 
-        self._set_layer_name(
-            instance_data["variant"],
-            layer_names_by_group_id[group_id],
-            layers_by_name,
-            layer_names_by_group_id,
-            group_id,
-        )
+        self._change_layers_group(marked_layers, group_id)
+
+        # Update layer data
+        for layer in marked_layers:
+            layer["group_id"] = group_id
 
         marked_layer_names = [layer["name"] for layer in marked_layers]
+
+        self._set_layer_name(
+            instance_data["variant"],
+            marked_layer_names,
+            layers_by_name,
+            layers_by_group_id,
+        )
+
         marked_layer_names_s = set(marked_layer_names)
         instances_to_remove = []
         for instance in self.create_context.instances:
@@ -673,7 +682,7 @@ class CreateRenderPass(TVPaintCreator):
         render_pass_name = self._get_render_pass_name(
             marked_layers,
             instance_data["variant"],
-            layer_names_by_group_id,
+            layers_by_group_id,
             group_id,
         )
         render_layer = render_layer_instance["variant"]
@@ -720,7 +729,6 @@ class CreateRenderPass(TVPaintCreator):
 
         self.host.write_instances(instances_data)
         self._add_instance_to_context(new_instance)
-        self._change_layers_group(marked_layers, group_id)
 
         return new_instance
 
@@ -819,15 +827,21 @@ class CreateRenderPass(TVPaintCreator):
         self,
         layers,
         variant,
-        layer_names_by_group_id,
+        layers_by_group_id,
         group_id,
     ):
-        group_layer_names = layer_names_by_group_id[group_id]
+        group_layers = layers_by_group_id[group_id]
+        group_layer_names = [layer["name"] for layer in group_layers]
         max_position = -1
         for layer in layers:
             layer_name = layer["name"]
             if layer_name in group_layer_names:
-                max_position = group_layer_names.index(layer_name)
+                pos = group_layer_names.index(layer_name)
+                if pos > max_position:
+                    max_position = pos
+
+        if max_position >= 0:
+            max_position = len(group_layer_names) - (max_position + 1)
 
         layer_template = "{}"
         if self.layer_idx_offset:
@@ -910,8 +924,7 @@ class CreateRenderPass(TVPaintCreator):
         variant: str,
         layer_names: list[str],
         layers_by_name: dict[str, list[dict[str, Any]]],
-        layer_names_by_group_id: dict[str, list[str]],
-        group_id: Optional[int] = None
+        layers_by_group_id: dict[str, list[dict[str, Any]]],
     ):
         if not self.layer_name_template["enabled"]:
             return
@@ -926,21 +939,25 @@ class CreateRenderPass(TVPaintCreator):
         if self.layer_idx_offset:
             layer_template = f"{{:0>{self.layer_idx_padding}}}"
 
-        for layer_name in tuple(layer_names):
+        for idx, layer_name in enumerate(tuple(layer_names)):
             layers = layers_by_name.get(layer_name)
             if not layers:
                 continue
             for layer in layers:
-                group_pos = layer["group_id"]
-                if group_id is not None:
-                    group_pos = group_id
-                group_layer_names = layer_names_by_group_id[group_pos]
-                layer_index = group_layer_names.index(layer["name"])
+                i_layer_name = layer["name"]
+                group_id = layer["group_id"]
+                group_layer_names = [
+                    layer["name"]
+                    for layer in layers_by_group_id[group_id]
+                ]
+                layer_index = len(group_layer_names)
+                if i_layer_name in group_layer_names:
+                    layer_index = group_layer_names.index(i_layer_name)
                 layer_pos = (
                     len(group_layer_names) - layer_index
                 ) * self.layer_idx_offset
 
-                group_pos = group_pos * self.group_idx_offset
+                group_pos = group_id * self.group_idx_offset
                 new_name = None
                 try:
                     new_name = template.format(
@@ -953,9 +970,8 @@ class CreateRenderPass(TVPaintCreator):
                         "Failed to create new layer name", exc_info=True
                     )
 
-                if new_name and layer["name"] != new_name:
+                if new_name and i_layer_name != new_name:
                     layer_id = layer["layer_id"]
-                    idx = layer_names.index(layer_name)
                     layer_names[idx] = new_name
                     layer["name"] = new_name
                     execute_george(f"tv_layerrename {layer_id} {new_name}")
