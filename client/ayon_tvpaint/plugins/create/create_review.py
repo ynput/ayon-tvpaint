@@ -34,11 +34,11 @@ class TVPaintReviewCreator(TVPaintAutoCreator):
         folder_entity = self.create_context.get_current_folder_entity()
         task_entity = self.create_context.get_current_task_entity()
         product_name = self.get_product_name(
-            project_entity["name"],
-            folder_entity,
-            task_entity,
-            self.default_variant,
-            self.create_context.host_name,
+            project_name=project_entity["name"],
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            variant=self.default_variant,
+            host_name=self.create_context.host_name,
             project_entity=project_entity,
         )
         data = {

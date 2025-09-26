@@ -72,12 +72,12 @@ class TVPaintCreatorCommon:
             folder_path, task_name
         )
         product_name = self.get_product_name(
-            project_name,
-            folder_entity,
-            task_entity,
-            instance["variant"],
-            host_name,
-            instance,
+            project_name=project_name,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            variant=instance["variant"],
+            host_name=host_name,
+            instance=instance,
             project_entity=project_entity,
         )
         instance["folderPath"] = folder_path
@@ -113,12 +113,12 @@ class TVPaintCreatorCommon:
             task_type = task_entity["taskType"]
 
         return get_product_name(
-            project_name,
-            task_name,
-            task_type,
-            host_name,
-            self.product_type,
-            variant,
+            project_name=project_name,
+            task_name=task_name,
+            task_type=task_type,
+            host_name=host_name,
+            product_type=self.product_type,
+            variant=variant,
             dynamic_data=dynamic_data,
             project_settings=self.project_settings,
             product_type_filter=self.product_template_product_type,
