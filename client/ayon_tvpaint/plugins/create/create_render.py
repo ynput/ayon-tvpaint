@@ -120,6 +120,7 @@ class CreateRenderlayer(TVPaintCreator):
 
     label = "Render Layer"
     product_type = "render"
+    product_base_type = "render"
     product_template_product_type = "renderLayer"
     identifier = "render.layer"
     icon = "fa5.images"
@@ -410,6 +411,7 @@ class CreateRenderlayer(TVPaintCreator):
 
 class CreateRenderPass(TVPaintCreator):
     product_type = "render"
+    product_base_type = "render"
     product_template_product_type = "renderPass"
     identifier = "render.pass"
     label = "Render Pass"
@@ -989,6 +991,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     """
 
     product_type = "render"
+    product_base_type = "render"
     label = "Render Layer/Passes"
     identifier = "render.auto.detect.creator"
     order = CreateRenderPass.order + 10
@@ -1397,6 +1400,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
 
 class TVPaintSceneRenderCreator(TVPaintAutoCreator):
     product_type = "render"
+    product_base_type = "render"
     product_template_product_type = "renderScene"
     identifier = "render.scene"
     label = "Scene Render"

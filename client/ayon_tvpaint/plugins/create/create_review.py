@@ -4,6 +4,7 @@ from ayon_tvpaint.api.plugin import TVPaintAutoCreator
 
 class TVPaintReviewCreator(TVPaintAutoCreator):
     product_type = "review"
+    product_base_type = "review"
     identifier = "scene.review"
     label = "Review"
     icon = "ei.video"
