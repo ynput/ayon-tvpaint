@@ -4,6 +4,7 @@ from ayon_tvpaint.api.plugin import TVPaintAutoCreator
 
 class TVPaintWorkfileCreator(TVPaintAutoCreator):
     product_type = "workfile"
+    product_base_type = "workfile"
     identifier = "workfile"
     label = "Workfile"
     icon = "fa.file-o"
