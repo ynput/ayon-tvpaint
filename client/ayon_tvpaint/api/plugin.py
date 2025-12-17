@@ -119,11 +119,15 @@ class TVPaintCreatorCommon:
                 "folder_entity": folder_entity,
                 "task_entity": task_entity,
                 "product_base_type": self.product_base_type,
+                "product_base_type_filter": (
+                    self.product_template_product_type
+                ),
             })
         else:
             get_product_name_kwargs.update({
                 "task_name": task_name,
                 "task_type": task_type,
+                "product_type_filter": self.product_template_product_type,
             })
 
         return get_product_name(
@@ -133,7 +137,6 @@ class TVPaintCreatorCommon:
             variant=variant,
             dynamic_data=dynamic_data,
             project_settings=self.project_settings,
-            product_type_filter=self.product_template_product_type,
             project_entity=project_entity,
             **get_product_name_kwargs
         )
