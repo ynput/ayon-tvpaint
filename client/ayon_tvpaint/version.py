@@ -1,3 +1,3 @@
 # -*- coding: utf-8 -*-
 """Package declaring AYON addon 'tvpaint' version."""
-__version__ = "0.3.14"
+__version__ = "0.3.14+dev"
