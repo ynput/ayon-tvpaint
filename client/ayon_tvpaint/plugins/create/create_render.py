@@ -154,13 +154,15 @@ class CreateRenderlayer(TVPaintCreator):
 
     def get_dynamic_data(
         self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name,
-        instance
-    ):
+        project_name: str,
+        folder_entity: Optional[dict[str, Any]],
+        task_entity: Optional[dict[str, Any]],
+        variant: str,
+        host_name: Optional[str] = None,
+        instance: Optional[CreatedInstance] = None,
+        project_entity: Optional[dict[str, Any]] = None,
+        product_type: Optional[str] = None,
+    ) -> dict[str, Any]:
         return {
             "renderpass": self.default_pass_name,
             "renderlayer": variant,
@@ -1408,13 +1410,15 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
 
     def get_dynamic_data(
         self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name,
-        instance
-    ):
+        project_name: str,
+        folder_entity: Optional[dict[str, Any]],
+        task_entity: Optional[dict[str, Any]],
+        variant: str,
+        host_name: Optional[str] = None,
+        instance: Optional[CreatedInstance] = None,
+        project_entity: Optional[dict[str, Any]] = None,
+        product_type: Optional[str] = None,
+    ) -> dict[str, Any]:
         return {
             "renderpass": "{renderpass}",
             "renderlayer": variant,
