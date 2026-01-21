@@ -519,26 +519,11 @@ class CreateRenderPass(TVPaintCreator):
                 render_layer_info.get("template_data"),
             )
 
-    def get_dynamic_data(
-        self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name,
-        instance
-    ):
-        dynamic_data = super().get_dynamic_data(
-            project_name,
-            folder_entity,
-            task_entity,
-            variant,
-            host_name,
-            instance
-        )
-        dynamic_data["renderpass"] = "{renderpass}"
-        dynamic_data["renderlayer"] = "{renderlayer}"
-        return dynamic_data
+    def get_dynamic_data(self, *args, **kwargs) -> dict[str, Any]:
+        return {
+            "renderpass": "{renderpass}",
+            "renderlayer": "{renderlayer}",
+        }
 
     def update_instance_labels(
         self,
