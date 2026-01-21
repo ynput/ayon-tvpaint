@@ -103,8 +103,6 @@ class TVPaintCreatorCommon:
         if project_entity is None:
             project_entity = self.create_context.get_current_project_entity()
 
-        if not product_type:
-            product_type = self.product_base_type
         # NOTE this is a workaround for backwards and forwards compatibility
         #   of 'get_dynamic_data' signature
         dyn_data_kwargs = dict(
@@ -130,6 +128,8 @@ class TVPaintCreatorCommon:
         get_product_name_kwargs = {}
 
         if getattr(get_product_name, "use_entities", False):
+            if not product_type:
+                product_type = self.product_base_type
             get_product_name_kwargs.update({
                 "folder_entity": folder_entity,
                 "task_entity": task_entity,
