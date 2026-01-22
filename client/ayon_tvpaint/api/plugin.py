@@ -116,7 +116,9 @@ class TVPaintCreatorCommon:
             product_type=product_type,
         )
         for kwarg in ("product_type", "project_entity"):
-            if not is_func_signature_supported(dyn_data_kwargs):
+            if not is_func_signature_supported(
+                self.get_dynamic_data, **dyn_data_kwargs
+            ):
                 dyn_data_kwargs.pop(kwarg)
         dynamic_data = self.get_dynamic_data(**dyn_data_kwargs)
 
