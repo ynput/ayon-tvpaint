@@ -239,10 +239,10 @@ class CreateRenderlayer(TVPaintCreator):
 
         self.log.info(f"Product name is {product_name}")
         new_instance = CreatedInstance(
-            product_type=self.product_base_type,
-            product_name=product_name,
-            data=instance_data,
-            creator=self
+            self.product_base_type,
+            product_name,
+            instance_data,
+            self
         )
         self._store_new_instance(new_instance)
 
@@ -706,10 +706,10 @@ class CreateRenderPass(TVPaintCreator):
         )
 
         new_instance = CreatedInstance(
-            product_type=self.product_base_type,
-            product_name=product_name,
-            data=instance_data,
-            creator=self,
+            self.product_base_type,
+            product_name,
+            instance_data,
+            self,
         )
         instances_data = self._remove_and_filter_instances(
             instances_to_remove
@@ -1455,10 +1455,10 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
             data["active"] = False
 
         new_instance = CreatedInstance(
-            product_type=self.product_base_type,
-            product_name=product_name,
-            data=data,
-            creator=self,
+            self.product_base_type,
+            product_name,
+            data,
+            self,
         )
         instances_data = self.host.list_instances()
         instances_data.append(new_instance.data_to_store())
