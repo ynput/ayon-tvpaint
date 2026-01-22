@@ -45,7 +45,7 @@ class TVPaintWorkfileCreator(TVPaintAutoCreator):
         }
 
         new_instance = CreatedInstance(
-            self.product_type,
+            self.product_base_type,
             product_name,
             data,
             self,
