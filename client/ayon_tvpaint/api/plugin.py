@@ -1,5 +1,7 @@
 import re
+from typing import Optional, Any
 
+from ayon_core.lib import is_func_signature_supported
 from ayon_core.pipeline import LoaderPlugin
 from ayon_core.pipeline.create import (
     CreatedInstance,
@@ -87,26 +89,39 @@ class TVPaintCreatorCommon:
 
     def _custom_get_product_name(
         self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name=None,
-        instance=None,
-        project_entity=None,
+        project_name: str,
+        folder_entity: Optional[dict[str, Any]],
+        task_entity: Optional[dict[str, Any]],
+        variant: str,
+        host_name: Optional[str],
+        instance: Optional[CreatedInstance],
+        project_entity: Optional[dict[str, Any]],
+        product_type: Optional[str],
     ):
         if host_name is None:
             host_name = self.create_context.host_name
         if project_entity is None:
             project_entity = self.create_context.get_current_project_entity()
-        dynamic_data = self.get_dynamic_data(
-            project_name,
-            folder_entity,
-            task_entity,
-            variant,
-            host_name,
-            instance
+
+        # NOTE this is a workaround for backwards and forwards compatibility
+        #   of 'get_dynamic_data' signature
+        dyn_data_kwargs = dict(
+            project_name=project_name,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            variant=variant,
+            host_name=host_name,
+            instance=instance,
+            project_entity=project_entity,
+            product_type=product_type,
         )
+        for kwarg in ("product_type", "project_entity"):
+            if not is_func_signature_supported(
+                self.get_dynamic_data, **dyn_data_kwargs
+            ):
+                dyn_data_kwargs.pop(kwarg)
+        dynamic_data = self.get_dynamic_data(**dyn_data_kwargs)
+
         task_name = task_type = None
         if task_entity:
             task_name = task_entity["name"]
@@ -115,9 +130,12 @@ class TVPaintCreatorCommon:
         get_product_name_kwargs = {}
 
         if getattr(get_product_name, "use_entities", False):
+            if not product_type:
+                product_type = self.product_base_type
             get_product_name_kwargs.update({
                 "folder_entity": folder_entity,
                 "task_entity": task_entity,
+                "product_type": product_type,
                 "product_base_type": self.product_base_type,
                 "product_base_type_filter": (
                     self.product_template_product_type
@@ -125,6 +143,7 @@ class TVPaintCreatorCommon:
             })
         else:
             get_product_name_kwargs.update({
+                "product_type": self.product_base_type,
                 "task_name": task_name,
                 "task_type": task_type,
                 "product_type_filter": self.product_template_product_type,
@@ -133,7 +152,6 @@ class TVPaintCreatorCommon:
         return get_product_name(
             project_name=project_name,
             host_name=host_name,
-            product_type=self.product_type,
             variant=variant,
             dynamic_data=dynamic_data,
             project_settings=self.project_settings,
@@ -177,14 +195,29 @@ class TVPaintCreator(Creator, TVPaintCreatorCommon):
             self._remove_instance_from_context(instance)
 
     def get_product_name(
-        self, project_name, folder_entity, task_entity, *args, **kwargs
+        self,
+        project_name,
+        folder_entity,
+        task_entity,
+        variant,
+        host_name=None,
+        instance=None,
+        project_entity=None,
+        product_type=None,
     ):
         if self._use_current_context:
             # Use the current context to get project and task
             folder_entity = self.create_context.get_current_folder_entity()
             task_entity = self.create_context.get_current_task_entity()
         return self._custom_get_product_name(
-            project_name, folder_entity, task_entity, *args, **kwargs
+            project_name=project_name,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            host_name=host_name,
+            variant=variant,
+            instance=instance,
+            project_entity=project_entity,
+            product_type=product_type,
         )
 
     def _store_new_instance(self, new_instance):
@@ -203,8 +236,27 @@ class TVPaintAutoCreator(AutoCreator, TVPaintCreatorCommon):
     def update_instances(self, update_list):
         self._update_create_instances(update_list)
 
-    def get_product_name(self, *args, **kwargs):
-        return self._custom_get_product_name(*args, **kwargs)
+    def get_product_name(
+        self,
+        project_name,
+        folder_entity,
+        task_entity,
+        variant,
+        host_name=None,
+        instance=None,
+        project_entity=None,
+        product_type=None,
+    ):
+        return self._custom_get_product_name(
+            project_name=project_name,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            variant=variant,
+            host_name=host_name,
+            instance=instance,
+            project_entity=project_entity,
+            product_type=product_type,
+        )
 
 
 class Loader(LoaderPlugin):

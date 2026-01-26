@@ -154,13 +154,15 @@ class CreateRenderlayer(TVPaintCreator):
 
     def get_dynamic_data(
         self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name,
-        instance
-    ):
+        project_name: str,
+        folder_entity: Optional[dict[str, Any]],
+        task_entity: Optional[dict[str, Any]],
+        variant: str,
+        host_name: Optional[str] = None,
+        instance: Optional[CreatedInstance] = None,
+        project_entity: Optional[dict[str, Any]] = None,
+        product_type: Optional[str] = None,
+    ) -> dict[str, Any]:
         return {
             "renderpass": self.default_pass_name,
             "renderlayer": variant,
@@ -237,7 +239,7 @@ class CreateRenderlayer(TVPaintCreator):
 
         self.log.info(f"Product name is {product_name}")
         new_instance = CreatedInstance(
-            self.product_type,
+            self.product_base_type,
             product_name,
             instance_data,
             self
@@ -519,26 +521,11 @@ class CreateRenderPass(TVPaintCreator):
                 render_layer_info.get("template_data"),
             )
 
-    def get_dynamic_data(
-        self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name,
-        instance
-    ):
-        dynamic_data = super().get_dynamic_data(
-            project_name,
-            folder_entity,
-            task_entity,
-            variant,
-            host_name,
-            instance
-        )
-        dynamic_data["renderpass"] = "{renderpass}"
-        dynamic_data["renderlayer"] = "{renderlayer}"
-        return dynamic_data
+    def get_dynamic_data(self, *args, **kwargs) -> dict[str, Any]:
+        return {
+            "renderpass": "{renderpass}",
+            "renderlayer": "{renderlayer}",
+        }
 
     def update_instance_labels(
         self,
@@ -719,10 +706,10 @@ class CreateRenderPass(TVPaintCreator):
         )
 
         new_instance = CreatedInstance(
-            self.product_type,
+            self.product_base_type,
             product_name,
             instance_data,
-            self
+            self,
         )
         instances_data = self._remove_and_filter_instances(
             instances_to_remove
@@ -1423,13 +1410,15 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
 
     def get_dynamic_data(
         self,
-        project_name,
-        folder_entity,
-        task_entity,
-        variant,
-        host_name,
-        instance
-    ):
+        project_name: str,
+        folder_entity: Optional[dict[str, Any]],
+        task_entity: Optional[dict[str, Any]],
+        variant: str,
+        host_name: Optional[str] = None,
+        instance: Optional[CreatedInstance] = None,
+        project_entity: Optional[dict[str, Any]] = None,
+        product_type: Optional[str] = None,
+    ) -> dict[str, Any]:
         return {
             "renderpass": "{renderpass}",
             "renderlayer": variant,
@@ -1466,7 +1455,10 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
             data["active"] = False
 
         new_instance = CreatedInstance(
-            self.product_type, product_name, data, self
+            self.product_base_type,
+            product_name,
+            data,
+            self,
         )
         instances_data = self.host.list_instances()
         instances_data.append(new_instance.data_to_store())
