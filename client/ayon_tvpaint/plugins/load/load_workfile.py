@@ -115,13 +115,14 @@ class LoadWorkfile(plugin.Loader):
                 host_name="tvpaint",
                 task_name=task_name,
                 task_type=data["task"]["type"],
-                product_type="workfile",
                 product_base_type="workfile",
             )
+            # Backwards compatibility
+            # TODO remove when ayon-core requirements is bumped above 1.8.0
             if not is_func_signature_supported(
                 get_versioning_start, **kwargs
             ):
-                kwargs.pop("product_base_type")
+                kwargs["product_type"] = kwargs.pop("product_base_type")
             version = get_versioning_start(**kwargs)
         else:
             version += 1
