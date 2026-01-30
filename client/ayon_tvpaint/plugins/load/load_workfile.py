@@ -122,7 +122,7 @@ class LoadWorkfile(plugin.Loader):
             if not is_func_signature_supported(
                 get_versioning_start, **kwargs
             ):
-                kwargs["procuct_type"] = kwargs.pop("product_base_type")
+                kwargs["product_type"] = kwargs.pop("product_base_type")
             version = get_versioning_start(**kwargs)
         else:
             version += 1
