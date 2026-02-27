@@ -1,7 +1,6 @@
 import re
 from typing import Optional, Any
 
-from ayon_core.lib import is_func_signature_supported
 from ayon_core.pipeline import LoaderPlugin
 from ayon_core.pipeline.create import (
     CreatedInstance,
@@ -19,8 +18,8 @@ SHARED_DATA_KEY = "ayon.tvpaint.instances"
 
 class TVPaintCreatorCommon:
     @property
-    def product_template_product_type(self):
-        return self.product_type
+    def product_template_product_base_type(self):
+        return self.product_base_type
 
     def _cache_and_get_instances(self):
         return cache_and_get_instances(
@@ -103,9 +102,10 @@ class TVPaintCreatorCommon:
         if project_entity is None:
             project_entity = self.create_context.get_current_project_entity()
 
-        # NOTE this is a workaround for backwards and forwards compatibility
-        #   of 'get_dynamic_data' signature
-        dyn_data_kwargs = dict(
+        if not product_type:
+            product_type = self.product_base_type
+
+        dynamic_data = self.get_dynamic_data(
             project_name=project_name,
             folder_entity=folder_entity,
             task_entity=task_entity,
@@ -115,48 +115,20 @@ class TVPaintCreatorCommon:
             project_entity=project_entity,
             product_type=product_type,
         )
-        for kwarg in ("product_type", "project_entity"):
-            if not is_func_signature_supported(
-                self.get_dynamic_data, **dyn_data_kwargs
-            ):
-                dyn_data_kwargs.pop(kwarg)
-        dynamic_data = self.get_dynamic_data(**dyn_data_kwargs)
-
-        task_name = task_type = None
-        if task_entity:
-            task_name = task_entity["name"]
-            task_type = task_entity["taskType"]
-
-        get_product_name_kwargs = {}
-
-        if getattr(get_product_name, "use_entities", False):
-            if not product_type:
-                product_type = self.product_base_type
-            get_product_name_kwargs.update({
-                "folder_entity": folder_entity,
-                "task_entity": task_entity,
-                "product_type": product_type,
-                "product_base_type": self.product_base_type,
-                "product_base_type_filter": (
-                    self.product_template_product_type
-                ),
-            })
-        else:
-            get_product_name_kwargs.update({
-                "product_type": self.product_base_type,
-                "task_name": task_name,
-                "task_type": task_type,
-                "product_type_filter": self.product_template_product_type,
-            })
-
         return get_product_name(
             project_name=project_name,
+            project_entity=project_entity,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            product_base_type=self.product_base_type,
+            product_type=product_type,
             host_name=host_name,
             variant=variant,
             dynamic_data=dynamic_data,
             project_settings=self.project_settings,
-            project_entity=project_entity,
-            **get_product_name_kwargs
+            product_base_type_filter=(
+                self.product_template_product_base_type
+            ),
         )
 
 
