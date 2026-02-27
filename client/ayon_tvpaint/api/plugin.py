@@ -134,6 +134,7 @@ class TVPaintCreatorCommon:
 
 class TVPaintCreator(Creator, TVPaintCreatorCommon):
     settings_category = "tvpaint"
+    skip_discovery = True
     _use_current_context = False
 
     def apply_settings(self, project_settings):
@@ -201,6 +202,7 @@ class TVPaintCreator(Creator, TVPaintCreatorCommon):
 
 class TVPaintAutoCreator(AutoCreator, TVPaintCreatorCommon):
     settings_category = "tvpaint"
+    skip_discovery = True
 
     def collect_instances(self):
         self._collect_create_instances()
@@ -234,6 +236,7 @@ class TVPaintAutoCreator(AutoCreator, TVPaintCreatorCommon):
 class Loader(LoaderPlugin):
     hosts = ["tvpaint"]
     settings_category = "tvpaint"
+    skip_discovery = True
 
     @staticmethod
     def get_members_from_container(container):
