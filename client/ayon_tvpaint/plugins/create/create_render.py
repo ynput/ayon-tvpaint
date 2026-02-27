@@ -119,9 +119,9 @@ class CreateRenderlayer(TVPaintCreator):
     """
 
     label = "Render Layer"
-    product_type = "render"
     product_base_type = "render"
-    product_template_product_type = "renderLayer"
+    product_type = product_base_type
+    product_template_product_base_type = "renderLayer"
     identifier = "render.layer"
     icon = "fa5.images"
 
@@ -406,9 +406,9 @@ class CreateRenderlayer(TVPaintCreator):
 
 
 class CreateRenderPass(TVPaintCreator):
-    product_type = "render"
     product_base_type = "render"
-    product_template_product_type = "renderPass"
+    product_type = product_base_type
+    product_template_product_base_type = "renderPass"
     identifier = "render.pass"
     label = "Render Pass"
     icon = "fa5.image"
@@ -960,8 +960,8 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     Never will have any instances, all instances belong to different creators.
     """
 
-    product_type = "render"
     product_base_type = "render"
+    product_type = product_base_type
     label = "Render Layer/Passes"
     identifier = "render.auto.detect.creator"
     order = CreateRenderPass.order + 10
@@ -1359,9 +1359,9 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
 
 
 class TVPaintSceneRenderCreator(TVPaintAutoCreator):
-    product_type = "render"
     product_base_type = "render"
-    product_template_product_type = "renderScene"
+    product_type = product_base_type
+    product_template_product_base_type = "renderScene"
     identifier = "render.scene"
     label = "Scene Render"
     icon = "fa.file-image-o"
