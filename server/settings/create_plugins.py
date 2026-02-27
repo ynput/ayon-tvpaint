@@ -1,6 +1,19 @@
 from ayon_server.settings import BaseSettingsModel, SettingsField
 
 
+class ProductTypeItemModel(BaseSettingsModel):
+    _layout = "compact"
+    product_type: str = SettingsField(
+        title="Product type",
+        description="Product type name"
+    )
+    label: str = SettingsField(
+        "",
+        title="Label",
+        description="Label to show in UI for the product type"
+    )
+
+
 class CreateWorkfileModel(BaseSettingsModel):
     enabled: bool = SettingsField(True)
     default_variant: str = SettingsField(title="Default variant")
@@ -24,6 +37,15 @@ class CreateRenderSceneModel(BaseSettingsModel):
     default_variant: str = SettingsField(title="Default variant")
     default_variants: list[str] = SettingsField(
         default_factory=list, title="Default variants")
+    product_type: str = SettingsField(
+        "",
+        title="Product type",
+        placeholder="Custom product type",
+        description=(
+            "Customize product type for UI purposes. Also may affect"
+            " final product name."
+        ),
+    )
 
 
 class CreateRenderLayerModel(BaseSettingsModel):
@@ -32,6 +54,13 @@ class CreateRenderLayerModel(BaseSettingsModel):
     default_variant: str = SettingsField(title="Default variant")
     default_variants: list[str] = SettingsField(
         default_factory=list, title="Default variants")
+    product_type_items: list[ProductTypeItemModel] = SettingsField(
+        default_factory=list,
+        title="Product type items",
+        description=(
+            "Optional list of product types this plugin can create."
+        ),
+    )
 
 
 class LayerNameTemplateModel(BaseSettingsModel):
@@ -77,6 +106,13 @@ class CreateRenderPassModel(BaseSettingsModel):
     )
     layer_idx_padding: int = SettingsField(
         3, title="Layer index Padding", ge=0
+    )
+    product_type_items: list[ProductTypeItemModel] = SettingsField(
+        default_factory=list,
+        title="Product type items",
+        description=(
+            "Optional list of product types this plugin can create."
+        ),
     )
 
 
