@@ -134,6 +134,7 @@ class CreateRenderlayer(TVPaintCreator):
     order = 90
     description = "Mark TVPaint color group as one Render Layer."
     detailed_description = RENDER_LAYER_DETAILED_DESCRIPTIONS
+    settings_name = "create_render_layer"
 
     # Settings
     # - Default render pass name for beauty
@@ -143,13 +144,6 @@ class CreateRenderlayer(TVPaintCreator):
 
     def apply_settings(self, project_settings):
         super().apply_settings(project_settings)
-        plugin_settings = (
-            project_settings["tvpaint"]["create"]["create_render_layer"]
-        )
-        self.default_variant = plugin_settings["default_variant"]
-        self.default_variants = plugin_settings["default_variants"]
-        self.default_pass_name = plugin_settings["default_pass_name"]
-        self.mark_for_review = plugin_settings["mark_for_review"]
         self.create_allow_context_change = not self._use_current_context
 
     def get_dynamic_data(
