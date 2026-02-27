@@ -26,7 +26,8 @@ from ayon_core.pipeline.version_start import get_versioning_start
 class LoadWorkfile(plugin.Loader):
     """Load workfile."""
 
-    product_types = {"workfile"}
+    product_base_types = {"workfile"}
+    product_types = product_base_types
     representations = {"tvpp"}
 
     label = "Load Workfile"
