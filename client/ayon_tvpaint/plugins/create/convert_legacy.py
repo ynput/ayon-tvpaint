@@ -102,6 +102,7 @@ class TVPaintLegacyConverted(ProductConvertorPlugin):
                 "group_id": group_id
             }
             render_layer["productType"] = "render"
+            render_layer["productBaseType"] = "render"
             group = groups_by_id[group_id]
             # Use group name for variant
             group["variant"] = group["name"]
@@ -129,6 +130,7 @@ class TVPaintLegacyConverted(ProductConvertorPlugin):
             render_pass["creator_identifier"] = "render.pass"
             render_pass["instance_id"] = render_pass.pop("uuid")
             render_pass["productType"] = "render"
+            render_pass["productBaseType"] = "render"
 
             render_pass["creator_attributes"] = {
                 "render_layer_instance_id": render_layer["instance_id"]
