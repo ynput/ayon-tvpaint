@@ -132,7 +132,7 @@ class AutoDetectCreateRenderModel(BaseSettingsModel):
     Would create group names "G010", "G020", ...
     """
 
-    enabled: bool = SettingsField(True)
+    enabled: bool = SettingsField(False)
     allow_group_rename: bool = SettingsField(title="Allow group rename")
     group_name_template: str = SettingsField(title="Group name template")
     group_idx_offset: int = SettingsField(
