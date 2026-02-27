@@ -140,6 +140,7 @@ class TVPaintCreator(Creator, TVPaintCreatorCommon):
     def apply_settings(self, project_settings):
         create_settings = project_settings["tvpaint"]["create"]
         self._use_current_context = create_settings["use_current_context"]
+        super().apply_settings(project_settings)
 
     def collect_instances(self):
         self._collect_create_instances()
