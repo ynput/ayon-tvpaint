@@ -420,6 +420,7 @@ class CreateRenderPass(TVPaintCreator):
     icon = "fa5.image"
     description = "Mark selected TVPaint layers as pass of Render Layer."
     detailed_description = RENDER_PASS_DETAILED_DESCRIPTIONS
+    settings_name = "create_render_pass"
 
     order = CreateRenderlayer.order + 10
 
@@ -445,18 +446,6 @@ class CreateRenderPass(TVPaintCreator):
 
     def apply_settings(self, project_settings):
         super().apply_settings(project_settings)
-        plugin_settings = (
-            project_settings["tvpaint"]["create"]["create_render_pass"]
-        )
-        self.layer_name_template = plugin_settings["layer_name_template"]
-        self.group_idx_offset = plugin_settings["group_idx_offset"]
-        self.group_idx_padding = plugin_settings["group_idx_padding"]
-        self.layer_idx_offset = plugin_settings["layer_idx_offset"]
-        self.layer_idx_padding = plugin_settings["layer_idx_padding"]
-        self.default_variant = plugin_settings["default_variant"]
-        self.default_variants = plugin_settings["default_variants"]
-        self.mark_for_review = plugin_settings["mark_for_review"]
-        self.render_pass_template = plugin_settings["render_pass_template"]
         self.create_allow_context_change = not self._use_current_context
 
     def collect_instances(self):
@@ -982,6 +971,7 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
     label = "Render Layer/Passes"
     identifier = "render.auto.detect.creator"
     order = CreateRenderPass.order + 10
+    settings_name = "auto_detect_render"
     description = (
         "Create Render Layers and Render Passes based on scene setup"
     )
@@ -997,17 +987,6 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
 
     def apply_settings(self, project_settings):
         super().apply_settings(project_settings)
-        plugin_settings = (
-            project_settings
-            ["tvpaint"]
-            ["create"]
-            ["auto_detect_render"]
-        )
-        self.enabled = plugin_settings.get("enabled", False)
-        self.allow_group_rename = plugin_settings["allow_group_rename"]
-        self.group_name_template = plugin_settings["group_name_template"]
-        self.group_idx_offset = plugin_settings["group_idx_offset"]
-        self.group_idx_padding = plugin_settings["group_idx_padding"]
         self.create_allow_context_change = not self._use_current_context
 
         render_pass_settings = (
@@ -1393,20 +1372,12 @@ class TVPaintSceneRenderCreator(TVPaintAutoCreator):
     label = "Scene Render"
     icon = "fa.file-image-o"
 
+    settings_name = "create_render_scene"
+
     # Settings
     default_pass_name = "beauty"
     mark_for_review = True
     active_on_create = False
-
-    def apply_settings(self, project_settings):
-        plugin_settings = (
-            project_settings["tvpaint"]["create"]["create_render_scene"]
-        )
-        self.default_variant = plugin_settings["default_variant"]
-        self.default_variants = plugin_settings["default_variants"]
-        self.mark_for_review = plugin_settings["mark_for_review"]
-        self.active_on_create = plugin_settings["active_on_create"]
-        self.default_pass_name = plugin_settings["default_pass_name"]
 
     def get_dynamic_data(
         self,
