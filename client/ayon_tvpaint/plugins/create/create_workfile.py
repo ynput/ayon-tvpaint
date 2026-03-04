@@ -3,18 +3,12 @@ from ayon_tvpaint.api.plugin import TVPaintAutoCreator
 
 
 class TVPaintWorkfileCreator(TVPaintAutoCreator):
-    product_type = "workfile"
     product_base_type = "workfile"
+    product_type = product_base_type
     identifier = "workfile"
     label = "Workfile"
     icon = "fa.file-o"
-
-    def apply_settings(self, project_settings):
-        plugin_settings = (
-            project_settings["tvpaint"]["create"]["create_workfile"]
-        )
-        self.default_variant = plugin_settings["default_variant"]
-        self.default_variants = plugin_settings["default_variants"]
+    settings_name = "create_workfile"
 
     def create(self):
         existing_instance = None

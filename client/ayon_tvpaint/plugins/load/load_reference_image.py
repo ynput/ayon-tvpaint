@@ -17,7 +17,8 @@ from ayon_tvpaint.api.pipeline import (
 class LoadImage(plugin.Loader):
     """Load image or image sequence to TVPaint as new layer."""
 
-    product_types = {"render", "image", "background", "plate", "review"}
+    product_base_types = {"render", "image", "background", "plate", "review"}
+    product_types = product_base_types
     representations = {"*"}
     settings_category = "tvpaint"
 

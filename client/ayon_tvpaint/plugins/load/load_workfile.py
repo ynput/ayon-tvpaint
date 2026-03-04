@@ -2,7 +2,6 @@ import os
 
 import ayon_api
 
-from ayon_core.lib import is_func_signature_supported
 from ayon_core.pipeline import (
     registered_host,
     get_current_context,
@@ -26,7 +25,8 @@ from ayon_core.pipeline.version_start import get_versioning_start
 class LoadWorkfile(plugin.Loader):
     """Load workfile."""
 
-    product_types = {"workfile"}
+    product_base_types = {"workfile"}
+    product_types = product_base_types
     representations = {"tvpp"}
 
     label = "Load Workfile"
@@ -110,20 +110,13 @@ class LoadWorkfile(plugin.Loader):
         )[1]
 
         if version is None:
-            kwargs = dict(
+            version = get_versioning_start(
                 project_name=project_name,
                 host_name="tvpaint",
                 task_name=task_name,
                 task_type=data["task"]["type"],
                 product_base_type="workfile",
             )
-            # Backwards compatibility
-            # TODO remove when ayon-core requirements is bumped above 1.8.0
-            if not is_func_signature_supported(
-                get_versioning_start, **kwargs
-            ):
-                kwargs["product_type"] = kwargs.pop("product_base_type")
-            version = get_versioning_start(**kwargs)
         else:
             version += 1
 
