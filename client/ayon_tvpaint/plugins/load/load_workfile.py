@@ -27,7 +27,8 @@ class LoadWorkfile(plugin.Loader):
 
     product_base_types = {"workfile"}
     product_types = product_base_types
-    representations = {"tvpp"}
+    representations = {"*"}
+    extensions = {"tvpp"}
 
     label = "Load Workfile"
 
