@@ -15,8 +15,8 @@
 
 #include <boost/chrono.hpp>
 
-#include <websocketpp/config/asio_no_tls_client.hpp>
-#include <websocketpp/client.hpp>
+#include <websocketpp/config/asio_no_tls.hpp>
+#include <websocketpp/server.hpp>
 
 #include "json.hpp"
 #include "jsonrpcpp.hpp"
@@ -74,35 +74,35 @@ static struct {
 
 // Json rpc 2.0 parser - for handling messages and callbacks
 jsonrpcpp::Parser parser;
-typedef websocketpp::client<websocketpp::config::asio_client> client;
+typedef websocketpp::server<websocketpp::config::asio> server;
 
 
 class connection_metadata {
 private:
     websocketpp::connection_hdl m_hdl;
-    client *m_endpoint;
+    server *m_endpoint;
     std::string m_status;
 public:
     typedef websocketpp::lib::shared_ptr<connection_metadata> ptr;
 
-    connection_metadata(websocketpp::connection_hdl hdl, client *endpoint)
+    connection_metadata(websocketpp::connection_hdl hdl, server *endpoint)
             : m_hdl(hdl), m_status("Connecting") {
         m_endpoint = endpoint;
     }
 
-    void on_open(client *c, websocketpp::connection_hdl hdl) {
+    void on_open(server *s, websocketpp::connection_hdl hdl) {
         m_status = "Open";
     }
 
-    void on_fail(client *c, websocketpp::connection_hdl hdl) {
+    void on_fail(server *s, websocketpp::connection_hdl hdl) {
         m_status = "Failed";
     }
 
-    void on_close(client *c, websocketpp::connection_hdl hdl) {
+    void on_close(server *s, websocketpp::connection_hdl hdl) {
         m_status = "Closed";
     }
 
-    void on_message(websocketpp::connection_hdl, client::message_ptr msg) {
+    void on_message(websocketpp::connection_hdl, server::message_ptr msg) {
         std::string json_str;
         if (msg->get_opcode() == websocketpp::frame::opcode::text) {
             json_str = msg->get_payload();
@@ -185,7 +185,7 @@ public:
 
 class websocket_endpoint {
 private:
-    client m_endpoint;
+    server m_endpoint;
     connection_metadata::ptr client_metadata;
     websocketpp::lib::shared_ptr<websocketpp::lib::thread> m_thread;
     bool thread_is_running = false;
@@ -201,13 +201,14 @@ public:
     }
 
     void close_connection() {
-        m_endpoint.stop_perpetual();
+        m_endpoint.stop_listening();
         if (connected())
         {
-            // Close client
+            // Close connection
             close(websocketpp::close::status::normal, "");
         }
         if (thread_is_running) {
+            m_endpoint.stop();
             // Join thread
             m_thread->join();
             thread_is_running = false;
@@ -218,55 +219,65 @@ public:
     {
         return (client_metadata && client_metadata->get_status() == "Open");
     }
-    int connect(std::string const &uri) {
-        if (client_metadata && client_metadata->get_status() == "Open") {
-            std::cout << "> Already connected" << std::endl;
-            return 0;
+
+    void on_open(websocketpp::connection_hdl hdl) {
+        client_metadata = websocketpp::lib::make_shared<connection_metadata>(hdl, &m_endpoint);
+        client_metadata->on_open(&m_endpoint, hdl);
+    }
+
+    void on_fail(websocketpp::connection_hdl hdl) {
+        if (client_metadata && client_metadata->get_hdl().lock() == hdl.lock()) {
+            client_metadata->on_fail(&m_endpoint, hdl);
         }
+    }
 
-        m_endpoint.init_asio();
-        m_endpoint.start_perpetual();
-
-        m_thread.reset(new websocketpp::lib::thread(&client::run, &m_endpoint));
-        thread_is_running = true;
-
-        websocketpp::lib::error_code ec;
-
-        client::connection_ptr con = m_endpoint.get_connection(uri, ec);
-
-        if (ec) {
-            std::cout << "> Connect initialization error: " << ec.message() << std::endl;
-            return -1;
+    void on_close(websocketpp::connection_hdl hdl) {
+        if (client_metadata && client_metadata->get_hdl().lock() == hdl.lock()) {
+            client_metadata->on_close(&m_endpoint, hdl);
         }
+    }
 
-        client_metadata = websocketpp::lib::make_shared<connection_metadata>(con->get_handle(), &m_endpoint);
+    void on_message(websocketpp::connection_hdl hdl, server::message_ptr msg) {
+        if (client_metadata && client_metadata->get_hdl().lock() == hdl.lock()) {
+            client_metadata->on_message(hdl, msg);
+        }
+    }
 
-        con->set_open_handler(websocketpp::lib::bind(
-                &connection_metadata::on_open,
-                client_metadata,
-                &m_endpoint,
+    int listen(int port) {
+        try {
+            m_endpoint.init_asio();
+
+            m_endpoint.set_open_handler(websocketpp::lib::bind(
+                &websocket_endpoint::on_open,
+                this,
                 websocketpp::lib::placeholders::_1
-       ));
-        con->set_fail_handler(websocketpp::lib::bind(
-                &connection_metadata::on_fail,
-                client_metadata,
-                &m_endpoint,
+            ));
+            m_endpoint.set_fail_handler(websocketpp::lib::bind(
+                &websocket_endpoint::on_fail,
+                this,
                 websocketpp::lib::placeholders::_1
-       ));
-        con->set_close_handler(websocketpp::lib::bind(
-                &connection_metadata::on_close,
-                client_metadata,
-                &m_endpoint,
+            ));
+            m_endpoint.set_close_handler(websocketpp::lib::bind(
+                &websocket_endpoint::on_close,
+                this,
                 websocketpp::lib::placeholders::_1
-       ));
-        con->set_message_handler(websocketpp::lib::bind(
-                &connection_metadata::on_message,
-                client_metadata,
+            ));
+            m_endpoint.set_message_handler(websocketpp::lib::bind(
+                &websocket_endpoint::on_message,
+                this,
                 websocketpp::lib::placeholders::_1,
                 websocketpp::lib::placeholders::_2
-       ));
+            ));
 
-        m_endpoint.connect(con);
+            m_endpoint.listen(port);
+            m_endpoint.start_accept();
+
+            m_thread.reset(new websocketpp::lib::thread(&server::run, &m_endpoint));
+            thread_is_running = true;
+        } catch (websocketpp::exception const & e) {
+            std::cout << "> Listen error: " << e.what() << std::endl;
+            return -1;
+        }
 
         return 1;
     }
@@ -313,30 +324,27 @@ public:
 
 class Communicator {
 private:
-    // URL to websocket server
-    std::string websocket_url;
+    // Port to listen on
+    int server_port;
     // Should be avalon plugin available?
     // - this may change during processing if websocketet url is not set or server is down
     bool server_available;
 public:
-    Communicator(std::string url);
+    Communicator(int port);
     Communicator();
     websocket_endpoint endpoint;
     bool is_connected();
     bool is_usable();
-    void connect();
+    void start();
     void process_requests();
     jsonrpcpp::Response call_method(std::string method_name, nlohmann::json params);
     void call_notification(std::string method_name, nlohmann::json params);
 };
 
 
-Communicator::Communicator(std::string url) {
-    // URL to websocket server
-    websocket_url = url;
-    // Should be avalon plugin available?
-    // - this may change during processing if websocketet url is not set or server is down
-    if (url == "") {
+Communicator::Communicator(int port) {
+    server_port = port;
+    if (port == 0) {
         server_available = false;
     } else {
         server_available = true;
@@ -352,14 +360,14 @@ bool Communicator::is_usable(){
     return server_available;
 }
 
-void Communicator::connect()
+void Communicator::start()
 {
     if (!server_available) {
         return;
     }
-    int con_result;
-    con_result = endpoint.connect(websocket_url);
-    if (con_result == -1)
+    int listen_result;
+    listen_result = endpoint.listen(server_port);
+    if (listen_result == -1)
     {
         server_available = false;
     } else {
@@ -515,7 +523,7 @@ int FAR PASCAL PI_Open(PIFilter* iFilter)
     iFilter->PIVersion = 1;
     iFilter->PIRevision = 0;
 
-    char *env_value = std::getenv("AYON_RPC_URL");
+    char *env_value = std::getenv("AYON_RPC_PORT");
     char tmp[256];
     char defaultOpen = (env_value != NULL) ? '1' : '0';
     // If this plugin was the one open at Aura shutdown, re-open it
@@ -535,8 +543,8 @@ int FAR PASCAL PI_Open(PIFilter* iFilter)
         Data.tickReq = req;
 
         TVGrabTicks(iFilter, req, PITICKS_FLAG_ON);
-        communication = new Communicator(env_value);
-        communication->connect();
+        communication = new Communicator(atoi(env_value));
+        communication->start();
         register_callbacks();
     }
     Data.inOpen = false;
