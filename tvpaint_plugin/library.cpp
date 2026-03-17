@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <fstream>
 #include <cstring>
 #include <map>
 #include <string>
@@ -282,6 +283,16 @@ public:
         return 1;
     }
 
+    int get_port() {
+        websocketpp::lib::error_code ec;
+        auto endpoint = m_endpoint.get_local_endpoint(ec);
+        if (ec) {
+            std::cout << "> Error getting local endpoint: " << ec.message() << std::endl;
+            return -1;
+        }
+        return endpoint.port();
+    }
+
     void close(websocketpp::close::status::value code, std::string reason) {
         if (!client_metadata || client_metadata->get_status() != "Open") {
             std::cout << "> Not connected yet" << std::endl;
@@ -324,13 +335,13 @@ public:
 
 class Communicator {
 private:
-    // Port to listen on
-    int server_port;
+    // Path where to store the port
+    std::string server_port_path;
     // Should be avalon plugin available?
     // - this may change during processing if websocketet url is not set or server is down
     bool server_available;
 public:
-    Communicator(int port);
+    Communicator(std::string port_path);
     Communicator();
     websocket_endpoint endpoint;
     bool is_connected();
@@ -342,9 +353,9 @@ public:
 };
 
 
-Communicator::Communicator(int port) {
-    server_port = port;
-    if (port == 0) {
+Communicator::Communicator(std::string port_path) {
+    server_port_path = port_path;
+    if (port_path.empty()) {
         server_available = false;
     } else {
         server_available = true;
@@ -366,12 +377,21 @@ void Communicator::start()
         return;
     }
     int listen_result;
-    listen_result = endpoint.listen(server_port);
+    listen_result = endpoint.listen(0);
     if (listen_result == -1)
     {
         server_available = false;
     } else {
         server_available = true;
+        int port = endpoint.get_port();
+        if (port != -1) {
+            std::ofstream port_file;
+            port_file.open(server_port_path);
+            port_file << port;
+            port_file.close();
+        } else {
+            server_available = false;
+        }
     }
 }
 
@@ -523,7 +543,7 @@ int FAR PASCAL PI_Open(PIFilter* iFilter)
     iFilter->PIVersion = 1;
     iFilter->PIRevision = 0;
 
-    char *env_value = std::getenv("AYON_RPC_PORT");
+    char *env_value = std::getenv("AYON_RPC_PORT_PATH");
     char tmp[256];
     char defaultOpen = (env_value != NULL) ? '1' : '0';
     // If this plugin was the one open at Aura shutdown, re-open it
@@ -543,7 +563,7 @@ int FAR PASCAL PI_Open(PIFilter* iFilter)
         Data.tickReq = req;
 
         TVGrabTicks(iFilter, req, PITICKS_FLAG_ON);
-        communication = new Communicator(atoi(env_value));
+        communication = new Communicator(env_value);
         communication->start();
         register_callbacks();
     }
