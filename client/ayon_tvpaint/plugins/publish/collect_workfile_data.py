@@ -151,15 +151,6 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
         self.log.info("Collecting scene data from workfile")
         workfile_info_parts = execute_george("tv_projectinfo").split(" ")
 
-        # Project frame start - not used
-        workfile_info_parts.pop(-1)
-        field_order = workfile_info_parts.pop(-1)
-        frame_rate = float(workfile_info_parts.pop(-1))
-        pixel_apsect = float(workfile_info_parts.pop(-1))
-        height = int(workfile_info_parts.pop(-1))
-        width = int(workfile_info_parts.pop(-1))
-        workfile_path = " ".join(workfile_info_parts).replace("\"", "")
-
         # Marks return as "{frame - 1} {state} ", example "0 set".
         result = execute_george("tv_markin")
         mark_in_frame, mark_in_state, _ = result.split(" ")
@@ -196,12 +187,6 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
             clip_index += 1
 
         scene_data = {
-            "currentFile": workfile_path,
-            "sceneWidth": width,
-            "sceneHeight": height,
-            "scenePixelAspect": pixel_apsect,
-            "sceneFps": frame_rate,
-            "sceneFieldOrder": field_order,
             "sceneMarkIn": int(mark_in_frame),
             "sceneMarkInState": mark_in_state == "set",
             "sceneMarkOut": int(mark_out_frame),
