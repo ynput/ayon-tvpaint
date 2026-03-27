@@ -148,9 +148,6 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
             "Group data:\"{}".format(json.dumps(group_data, indent=4))
         )
 
-        self.log.info("Collecting scene data from workfile")
-        workfile_info_parts = execute_george("tv_projectinfo").split(" ")
-
         # Marks return as "{frame - 1} {state} ", example "0 set".
         result = execute_george("tv_markin")
         mark_in_frame, mark_in_state, _ = result.split(" ")
