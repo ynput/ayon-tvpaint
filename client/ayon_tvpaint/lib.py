@@ -535,10 +535,16 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
 
 def copy_render_file(src_path, dst_path):
     """Create copy file of an image."""
-    if hasattr(os, "link"):
-        os.link(src_path, dst_path)
-    else:
+    if not hasattr(os, "link"):
         shutil.copy(src_path, dst_path)
+        return
+
+    try:
+        os.link(src_path, dst_path)
+    except OSError:
+        shutil.copy(src_path, dst_path)
+        os.remove(src_path)
+        shutil.copy(dst_path, src_path)
 
 
 def cleanup_rendered_layers(filepaths_by_layer_id):
