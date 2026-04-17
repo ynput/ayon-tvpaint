@@ -544,7 +544,7 @@ def copy_render_file(src_path, dst_path):
     except OSError as exc:
         if exc.errno != 22:
             raise
-        # Exceeded hardlink limit, create new copy of source file and re-start
+        # Exceeded hardlink limit, create new copy of source file to reset
         #   the link limit.
         # NOTE limit on NTFS is 1023 hardlinks
         shutil.copy(src_path, dst_path)
