@@ -541,10 +541,16 @@ def copy_render_file(src_path, dst_path):
 
     try:
         os.link(src_path, dst_path)
-    except OSError:
+    except OSError as exc:
+        if exc.errno != 22:
+            raise
+        # Exceeded hardlink limit, create new copy of source file and re-start
+        #   the link limit.
+        # NOTE limit on NTFS is 1023 hardlinks
         shutil.copy(src_path, dst_path)
         os.remove(src_path)
-        shutil.copy(dst_path, src_path)
+        os.rename(dst_path, src_path)
+        os.link(src_path, dst_path)
 
 
 def cleanup_rendered_layers(filepaths_by_layer_id):
