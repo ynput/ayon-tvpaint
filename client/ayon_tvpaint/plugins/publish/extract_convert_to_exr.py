@@ -419,8 +419,8 @@ class ExtractConvertToEXR(pyblish.api.ContextPlugin):
             # Remove the source representation of the render layer
             if self.replace_pngs:
                 layer_repres.remove(src_layer_repre)
-                staging_dir = repre["stagingDir"]
-                filenames = repre["files"]
+                staging_dir = src_layer_repre["stagingDir"]
+                filenames = src_layer_repre["files"]
                 if not isinstance(filenames, list):
                     filenames = [filenames]
                 src_filepaths = [
