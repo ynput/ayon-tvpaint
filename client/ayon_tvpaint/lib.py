@@ -542,7 +542,8 @@ def copy_render_file(src_path, dst_path):
     try:
         os.link(src_path, dst_path)
     except OSError as exc:
-        if exc.errno != 22:
+        winerror = getattr(exc, "winerror", None)
+        if winerror != 1142:
             raise
         # Exceeded hardlink limit, create new copy of source file to reset
         #   the link limit.
