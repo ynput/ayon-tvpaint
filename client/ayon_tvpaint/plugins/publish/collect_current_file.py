@@ -31,7 +31,6 @@ class CollectCurrentFile(pyblish.api.ContextPlugin):
             "scenePixelAspect": pixel_apsect,
             "sceneFps": frame_rate,
             "sceneFieldOrder": field_order,
-            "sceneBgColor": self._get_bg_color(),
         }
         self.log.debug(f"Scene data: {scene_data}")
         context.data.update(scene_data)
