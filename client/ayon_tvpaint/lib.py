@@ -535,10 +535,23 @@ def fill_reference_frames(frame_references, filepaths_by_frame):
 
 def copy_render_file(src_path, dst_path):
     """Create copy file of an image."""
-    if hasattr(os, "link"):
-        os.link(src_path, dst_path)
-    else:
+    if not hasattr(os, "link"):
         shutil.copy(src_path, dst_path)
+        return
+
+    try:
+        os.link(src_path, dst_path)
+    except OSError as exc:
+        winerror = getattr(exc, "winerror", None)
+        if winerror != 1142:
+            raise
+        # Exceeded hardlink limit, create new copy of source file to reset
+        #   the link limit.
+        # NOTE limit on NTFS is 1023 hardlinks
+        shutil.copy(src_path, dst_path)
+        os.remove(src_path)
+        os.rename(dst_path, src_path)
+        os.link(src_path, dst_path)
 
 
 def cleanup_rendered_layers(filepaths_by_layer_id):
