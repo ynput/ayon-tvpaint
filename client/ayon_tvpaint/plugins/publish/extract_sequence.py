@@ -341,7 +341,10 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         )
 
         # Render layers
-        filepaths_by_layer_id = {}
+        filepaths_by_layer_id = {
+            layer_id: {}
+            for layer_id in layers_by_id
+        }
         for layer_id, render_data in extraction_data_by_layer_id.items():
             layer = layers_by_id[layer_id]
             transparency = 1.0
