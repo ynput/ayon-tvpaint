@@ -343,22 +343,24 @@ class ExtractSequence(pyblish.api.InstancePlugin):
 
         # Fake transparent output of layers that either don't have exposure
         #   frames or don't have frames in Mark in/out range.
-        for layer_id, layer in layers_by_id:
+        for layer_id, layer in layers_by_id.items():
             if layer_id in extraction_data_by_layer_id:
                 continue
             layer_position = layer["position"]
             layer_template = get_layer_pos_filename_template(mark_out)
-            filenames_by_frame_index = {}
-            for frame_idx in range(mark_in, mark_out + 1):
-                filenames_by_frame_index[frame_idx] = layer_template.format(
-                    pos=layer_position,
-                    frame=frame_idx
-                )
 
             frame_references = {
                 frame: mark_in
                 for frame in range(mark_in, mark_out + 1)
             }
+
+            filenames_by_frame_index = {}
+            for frame_idx in frame_references:
+                filenames_by_frame_index[frame_idx] = layer_template.format(
+                    pos=layer_position,
+                    frame=frame_idx
+                )
+
             extraction_data_by_layer_id[layer_id] = {
                 "frame_references": frame_references,
                 "filenames_by_frame_index": filenames_by_frame_index,
