@@ -343,9 +343,13 @@ class ExtractSequence(pyblish.api.InstancePlugin):
 
         # Fake transparent output of layers that either don't have exposure
         #   frames or don't have frames in Mark in/out range.
+        transparent_layer_ids = set()
         for layer_id, layer in layers_by_id.items():
             if layer_id in extraction_data_by_layer_id:
                 continue
+
+            transparent_layer_ids.add(layer_id)
+
             layer_position = layer["position"]
             layer_template = get_layer_pos_filename_template(mark_out)
 
@@ -377,6 +381,10 @@ class ExtractSequence(pyblish.api.InstancePlugin):
                 transparency_int = int(execute_george("tv_layerdensity 100"))
                 execute_george(f"tv_layerdensity {transparency_int}")
                 transparency = float(transparency_int) / 100.0
+
+            # Make sure transparent images are transparent
+            if layer_id in transparent_layer_ids:
+                transparency = 0.0
 
             filepaths_by_layer_id[layer_id] = self._render_layer(
                 render_data, layer, output_dir, transparency
