@@ -1,6 +1,6 @@
 name = "tvpaint"
 title = "TVPaint"
-version = "0.4.0+dev"
+version = "0.4.1"
 app_host_name = "tvpaint"
 client_dir = "ayon_tvpaint"
 project_can_override_addon_version = True
