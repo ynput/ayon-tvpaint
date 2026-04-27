@@ -18,6 +18,7 @@ from ayon_tvpaint.api.lib import (
     execute_george_through_file,
     get_layers_pre_post_behavior,
     get_layers_exposure_frames,
+    get_layer_pos_filename_template,
 )
 from ayon_tvpaint.lib import (
     calculate_layers_extraction_data,
@@ -340,6 +341,35 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             mark_out
         )
 
+        # Fake transparent output of layers that either don't have exposure
+        #   frames or don't have frames in Mark in/out range.
+        transparent_layer_ids = set()
+        for layer_id, layer in layers_by_id.items():
+            if layer_id in extraction_data_by_layer_id:
+                continue
+
+            transparent_layer_ids.add(layer_id)
+
+            layer_position = layer["position"]
+            layer_template = get_layer_pos_filename_template(mark_out)
+
+            frame_references = {
+                frame: mark_in
+                for frame in range(mark_in, mark_out + 1)
+            }
+
+            filenames_by_frame_index = {}
+            for frame_idx in frame_references:
+                filenames_by_frame_index[frame_idx] = layer_template.format(
+                    pos=layer_position,
+                    frame=frame_idx
+                )
+
+            extraction_data_by_layer_id[layer_id] = {
+                "frame_references": frame_references,
+                "filenames_by_frame_index": filenames_by_frame_index,
+            }
+
         # Render layers
         filepaths_by_layer_id = {}
         for layer_id, render_data in extraction_data_by_layer_id.items():
@@ -351,6 +381,10 @@ class ExtractSequence(pyblish.api.InstancePlugin):
                 transparency_int = int(execute_george("tv_layerdensity 100"))
                 execute_george(f"tv_layerdensity {transparency_int}")
                 transparency = float(transparency_int) / 100.0
+
+            # Make sure transparent images are transparent
+            if layer_id in transparent_layer_ids:
+                transparency = 0.0
 
             filepaths_by_layer_id[layer_id] = self._render_layer(
                 render_data, layer, output_dir, transparency
