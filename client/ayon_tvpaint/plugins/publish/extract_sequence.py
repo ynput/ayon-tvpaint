@@ -18,11 +18,11 @@ from ayon_tvpaint.api.lib import (
     execute_george_through_file,
     get_layers_pre_post_behavior,
     get_layers_exposure_frames,
-    get_layer_pos_filename_template,
 )
 from ayon_tvpaint.lib import (
     calculate_layers_extraction_data,
     get_frame_filename_template,
+    get_layer_pos_filename_template,
     fill_reference_frames,
     composite_rendered_layers,
     rename_filepaths_by_frame_start,
