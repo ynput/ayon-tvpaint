@@ -46,10 +46,11 @@ class TVPaintReviewCreator(TVPaintAutoCreator):
             data["active"] = False
 
         new_instance = CreatedInstance(
-            self.product_base_type,
-            product_name,
-            data,
-            self,
+            product_base_type=self.product_base_type,
+            product_type=self.product_base_type,
+            product_name=product_name,
+            data=data,
+            creator=self,
         )
         instances_data = self.host.list_instances()
         instances_data.append(new_instance.data_to_store())
