@@ -1,0 +1,21 @@
+--- a/communication_server.py
++++ b/communication_server.py
+@@ -648,9 +648,12 @@
+         """Launch TVPaint application with given arguments."""
+         # ... existing code ...
+         # Determine creation flags
+-        creationflags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
++        # Use start_new_session on Unix to detach process
++        kwargs = {}
++        if sys.platform == "win32":
++            kwargs["creationflags"] = subprocess.DETACHED_PROCESS
++        else:
++            kwargs["start_new_session"] = True
+         self._process = subprocess.Popen(
+             launch_args,
+             stdout=subprocess.PIPE,
+             stderr=subprocess.PIPE,
+             stdin=subprocess.DEVNULL,
+-            creationflags=creationflags
++            **kwargs
+         )
