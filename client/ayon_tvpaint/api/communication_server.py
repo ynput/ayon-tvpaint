@@ -691,7 +691,8 @@ class BaseCommunicator:
         The preference is patched in bytes because 'config.ini' also
         holds non-utf8 content which must stay untouched.
         """
-
+        # NOTE config.ini does contain special byte characters that's why
+        #     configparser.ConfigParser is NOT used to work with the file.
         key = b"georgecanwritefiledisplaypopup"
         found_config = False
         for config_path in self._iter_tvpaint_config_files():
