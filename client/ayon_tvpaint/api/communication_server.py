@@ -702,9 +702,8 @@ class BaseCommunicator:
             match = re.search(key + rb"[ \t]*=[ \t]*(\d+)", content)
             if match is None:
                 log.warning(
-                    "Preference \"{}\" not found in \"{}\".".format(
-                        key.decode(), config_path
-                    )
+                    f"Preference \"{key.decode()}\""
+                    f" not found in \"{config_path}\"."
                 )
                 continue
 
