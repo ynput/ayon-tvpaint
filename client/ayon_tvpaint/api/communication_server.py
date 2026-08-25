@@ -671,7 +671,7 @@ class BaseCommunicator:
                 try:
                     parser.read(system_ini)
                     profile = parser.get(
-                        "system", "config", fallback="default"
+                        "system", "config", fallback=profile
                     )
                 except configparser.Error:
                     pass
