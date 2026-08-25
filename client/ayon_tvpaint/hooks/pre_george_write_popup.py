@@ -18,11 +18,9 @@ class TvpaintGeorgeWritePopup(PreLaunchHook):
 
     app_groups = {"tvpaint"}
     launch_types = {LaunchTypes.local}
+    platforms = {"windows"}
 
     def execute(self):
-        if platform.system().lower() != "windows":
-            return
-
         # NOTE config.ini does contain special byte characters that's why
         #     configparser.ConfigParser is NOT used to work with the file.
         key = b"georgecanwritefiledisplaypopup"
