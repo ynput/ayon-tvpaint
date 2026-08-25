@@ -1,7 +1,6 @@
 import os
 import re
 import glob
-import platform
 import configparser
 
 from ayon_applications import PreLaunchHook, LaunchTypes
