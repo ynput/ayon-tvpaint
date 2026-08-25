@@ -717,9 +717,7 @@ class BaseCommunicator:
             with open(config_path, "wb") as stream:
                 stream.write(content)
 
-            log.info(
-                "Disabled george write popup in \"{}\".".format(config_path)
-            )
+            log.info(f"Disabled george write popup in \"{config_path}\".")
 
         if not found_config:
             log.warning("Did not find any TVPaint 'config.ini'.")
