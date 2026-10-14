@@ -160,8 +160,37 @@ class TVPaintServerInfo:
     def plugin_version(self):
         return self.data.get("plugin_version")
 
+    @property
+    def executable(self):
+        return self.data.get("executable")
+
+    def is_executable(self, executable):
+        """Server runs in TVPaint launched with the executable."""
+        if not self.executable:
+            return True
+        return _normalize_path(self.executable) == _normalize_path(executable)
+
     def __repr__(self):
         return f"<TVPaintServerInfo pid={self.pid} url={self.url}>"
+
+
+def _normalize_path(path):
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+class _RunningProcess:
+    """Process which was not started by this process.
+
+    Mimics 'poll' of 'subprocess.Popen' used to check if TVPaint is running.
+    """
+    def __init__(self, pid):
+        self.pid = pid
+        self.returncode = None
+
+    def poll(self):
+        if self.returncode is None and not _is_process_running(self.pid):
+            self.returncode = 0
+        return self.returncode
 
 
 def get_running_servers():
@@ -433,65 +462,84 @@ class TVPaintRpcClient:
 def get_host_client_info():
     """Data of this process registered in TVPaint as its host client.
 
-    Other AYON processes use them to decide if TVPaint can be reused.
+    Other AYON processes use them to decide if TVPaint can be reused. Same
+    bundle and variant means same addons, so the host client can open
+    workfile of any project.
 
     Returns:
         dict[str, Any]: Host client data.
 
     """
+    from ayon_core.lib import get_settings_variant
+
     return {
+        "bundle_name": os.getenv("AYON_BUNDLE_NAME"),
+        "studio_bundle_name": os.getenv("AYON_STUDIO_BUNDLE_NAME"),
+        "variant": get_settings_variant(),
         "addon_version": ADDON_VERSION,
-        "project_name": os.getenv("AYON_PROJECT_NAME"),
         "pid": os.getpid(),
     }
 
 
-def _get_workfile_from_launch_args(launch_args):
+def get_workfile_from_launch_args(launch_args):
+    """Workfile path passed to TVPaint executable.
+
+    Args:
+        launch_args (list[str]): TVPaint executable followed by arguments.
+
+    Returns:
+        Optional[str]: Path to workfile.
+
+    """
     for arg in launch_args[1:]:
         if arg.lower().endswith(".tvpp"):
             return arg
     return None
 
 
-def open_in_running_tvpaint(launch_args):
-    """Open workfile in already running TVPaint, if possible.
+class RunningTVPaint:
+    """TVPaint which is already running.
 
-    TVPaint is reused if an AYON process controlling it uses the same
-    addon version and the same project. The workfile from launch arguments
-    is opened by that process with context of this process, which stores
-    the context to the workfile metadata.
+    TVPaint is single instance application, launching its executable again
+    only passes arguments to the running TVPaint. AYON has to use it.
 
     Args:
-        launch_args (list[str]): TVPaint launch arguments, executable
-            followed by the workfile path.
-
-    Returns:
-        bool: Workfile was opened in running TVPaint.
+        server_info (TVPaintServerInfo): Server of the TVPaint plugin.
+        host_client (Optional[dict[str, Any]]): Data of AYON process
+            controlling the TVPaint, None if there is not any.
 
     """
-    workfile_path = _get_workfile_from_launch_args(launch_args)
-    project_name = os.getenv("AYON_PROJECT_NAME")
-    folder_path = os.getenv("AYON_FOLDER_PATH")
-    task_name = os.getenv("AYON_TASK_NAME")
-    # Context is passed only with the workfile
-    if not all((workfile_path, project_name, folder_path, task_name)):
-        return False
+    def __init__(self, server_info, host_client):
+        self.server_info = server_info
+        self.host_client = host_client
 
-    for server_info in get_running_servers():
+    @property
+    def has_host_client(self):
+        return self.host_client is not None
+
+    def is_compatible(self):
+        """Host client uses the same bundle and variant as this process."""
+        if self.host_client is None:
+            return True
+        current = get_host_client_info()
+        return all(
+            self.host_client.get(key) == current[key]
+            for key in ("bundle_name", "studio_bundle_name", "variant")
+        )
+
+    def open_workfile(
+        self, workfile_path, project_name, folder_path, task_name
+    ):
+        """Let host client open workfile in context.
+
+        Raises:
+            TVPaintRpcError: Host client failed to open the workfile.
+            ConnectionError: Connection to TVPaint failed.
+
+        """
         client = TVPaintRpcClient()
         try:
-            client.connect(server_info.url)
-            info = client.send_request("get_server_info", timeout=5)
-            host_client = info.get("host_client") or {}
-            if (
-                host_client.get("addon_version") != ADDON_VERSION
-                or host_client.get("project_name") != project_name
-            ):
-                continue
-
-            log.info(
-                f"Opening workfile in running TVPaint (pid {server_info.pid})"
-            )
+            client.connect(self.server_info.url)
             # No timeout, user might be asked to save current changes
             client.send_request("send_to_host", {
                 "method": "open_workfile",
@@ -502,8 +550,28 @@ def open_in_running_tvpaint(launch_args):
                     "task_name": task_name,
                 },
             })
-            return True
+        finally:
+            client.close()
 
+
+def find_running_tvpaint(executable):
+    """Find running TVPaint launched with the executable.
+
+    Args:
+        executable (str): Path to TVPaint executable.
+
+    Returns:
+        Optional[RunningTVPaint]: Running TVPaint or None.
+
+    """
+    for server_info in get_running_servers():
+        if not server_info.is_executable(executable):
+            continue
+
+        client = TVPaintRpcClient()
+        try:
+            client.connect(server_info.url)
+            info = client.send_request("get_server_info", timeout=5)
         except (
             TVPaintRpcError,
             ConnectionError,
@@ -512,13 +580,15 @@ def open_in_running_tvpaint(launch_args):
             aiohttp.ClientError,
         ):
             log.warning(
-                f"Failed to use running TVPaint (pid {server_info.pid})",
+                "Failed to connect to running TVPaint"
+                f" (pid {server_info.pid})",
                 exc_info=True
             )
-
+            continue
         finally:
             client.close()
-    return False
+        return RunningTVPaint(server_info, info.get("host_client"))
+    return None
 
 
 class QtTVPaintRpc:
@@ -548,8 +618,8 @@ class QtTVPaintRpc:
     ):
         """Open workfile with context, called by other AYON process.
 
-        Context is changed before the workfile is opened and is stored to
-        the workfile metadata after it is opened.
+        The context is stored to the workfile metadata, the project can
+        differ from the current one.
         """
         log.info(f"Opening workfile '{workfile_path}' requested by launch")
         item = MainThreadItem(
@@ -568,13 +638,6 @@ class QtTVPaintRpc:
         import ayon_api
         from ayon_core.pipeline import registered_host
 
-        # Host process can't change project
-        current_project_name = os.getenv("AYON_PROJECT_NAME")
-        if project_name != current_project_name:
-            raise ValueError(
-                f"Can't open workfile of project '{project_name}',"
-                f" TVPaint is used for project '{current_project_name}'."
-            )
         if not os.path.exists(workfile_path):
             raise ValueError(f"Workfile '{workfile_path}' does not exist.")
 
@@ -589,8 +652,8 @@ class QtTVPaintRpc:
                 f"Task '{task_name}' was not found in '{folder_path}'."
             )
 
-        registered_host().open_workfile_with_context(
-            workfile_path, folder_entity, task_entity
+        registered_host().open_workfile_in_context(
+            workfile_path, project_name, folder_entity, task_entity
         )
 
     # Panel routes for tools
@@ -1002,6 +1065,32 @@ class BaseCommunicator:
         self.connect(server_info)
 
         self._on_client_connect()
+
+        emit_event("application.launched")
+
+    def attach(self, server_info, workfile_path=None):
+        """Use already running TVPaint which has no host client.
+
+        TVPaint is single instance application, so it can't be launched
+        again. The workfile is opened the same way as if it was passed to
+        launched TVPaint, its context is stored on 'application.launched'.
+
+        Args:
+            server_info (TVPaintServerInfo): Server of running TVPaint.
+            workfile_path (Optional[str]): Workfile to open.
+
+        """
+        from ayon_core.pipeline import registered_host
+
+        self._create_client()
+        self.process = _RunningProcess(server_info.pid)
+        self.connect(server_info)
+
+        self._on_client_connect()
+
+        if workfile_path:
+            log.info(f"Opening workfile '{workfile_path}'")
+            registered_host().open_workfile(workfile_path)
 
         emit_event("application.launched")
 

@@ -52,9 +52,18 @@ When a menu button is clicked, the plugin sends a notification named after the b
 
 ## Host client and reuse of running TVPaint
 
-The AYON process that controls TVPaint (tools, menu, publishing) registers itself with `register_host`, passing `{"addon_version", "project_name", "pid"}`. Only one host client can be registered. The registration is removed when its connection closes.
+The AYON process that controls TVPaint (tools, menu, publishing) registers itself with `register_host`, passing `{"bundle_name", "studio_bundle_name", "variant", "addon_version", "pid"}`. Only one host client can be registered. The registration is removed when its connection closes.
 
-When TVPaint is launched from AYON again, the new launch process (`launch_script.py`) looks for a running TVPaint whose host client has the same addon version and project. If it finds one, it calls `send_to_host` with method `open_workfile` and params `{"workfile_path", "project_name", "folder_path", "task_name"}`, then exits. The host client opens the workfile with `open_workfile_with_context`, which switches the context and stores it in the workfile metadata. If there is no workfile in the launch arguments, no matching TVPaint, or the host client returns an error, a new TVPaint is launched.
+TVPaint is a single-instance application: running its executable again only passes the arguments to the running TVPaint and exits. So `launch_script.py` never launches TVPaint while one is running. It looks for a server whose `executable` matches the TVPaint being launched, then:
+
+| Running TVPaint | Launch does |
+| --- | --- |
+| none | Launch TVPaint. |
+| no host client (e.g. started without AYON) | Attach to it and become the host client, open the workfile from the launch arguments. |
+| host client with the same bundle, studio bundle and variant | Call `send_to_host` with method `open_workfile` and params `{"workfile_path", "project_name", "folder_path", "task_name"}`, then exit. |
+| host client with a different bundle or variant | Show an error asking to close TVPaint first. |
+
+The project doesn't have to match. TVPaint's current context, project included, is stored in the workfile metadata. The host client opens the workfile with `TVPaintHost.open_workfile_in_context`, which stores the new context in the opened workfile's metadata. It mirrors ayon-core's `open_workfile_with_context`, with the same hooks and events, but takes the project as an argument.
 
 ## Build
 

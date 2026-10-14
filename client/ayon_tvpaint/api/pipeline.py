@@ -9,7 +9,15 @@ import pyblish.api
 
 from ayon_tvpaint import TVPAINT_ROOT_DIR
 
-from ayon_core.host import HostBase, IWorkfileHost, ILoadHost, IPublishHost
+from ayon_core.host import (
+    HostBase,
+    IWorkfileHost,
+    ILoadHost,
+    IPublishHost,
+    ContextChangeData,
+    ContextChangeReason,
+)
+from ayon_core.host.interfaces import get_open_workfile_context
 from ayon_core.settings import get_current_project_settings
 from ayon_core.lib import register_event_callback
 from ayon_core.pipeline import (
@@ -150,6 +158,64 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
             filepath.replace("\\", "/")
         )
         return execute_george_through_file(george_script)
+
+    def open_workfile_in_context(
+        self, filepath, project_name, folder_entity, task_entity
+    ):
+        """Open workfile in context which can be of a different project.
+
+        Current context of TVPaint is stored in workfile metadata, so the
+        project changes once the opened workfile has the context stored.
+        Mirrors 'open_workfile_with_context' which always uses the current
+        project.
+
+        Args:
+            filepath (str): Path to workfile.
+            project_name (str): Project name.
+            folder_entity (dict[str, Any]): Folder entity.
+            task_entity (dict[str, Any]): Task entity.
+
+        """
+        open_workfile_context = get_open_workfile_context(
+            project_name,
+            filepath,
+            folder_entity,
+            task_entity,
+            prepared_data=None,
+        )
+        folder_path = folder_entity["path"]
+        task_name = task_entity["name"]
+
+        os.environ["AYON_WORKDIR"] = os.path.dirname(filepath)
+        event_data = self._get_workfile_event_data(
+            project_name, folder_entity, task_entity, filepath
+        )
+        self._before_workfile_open(open_workfile_context)
+        self._emit_workfile_open_event(event_data, after_open=False)
+
+        self.open_workfile(filepath)
+
+        # Context of the opened workfile becomes the current context
+        save_current_workfile_context({
+            "project_name": project_name,
+            "folder_path": folder_path,
+            "task_name": task_name,
+        })
+        context_change_data = ContextChangeData(
+            project_entity=open_workfile_context.project_entity,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            reason=ContextChangeReason.workfile_open,
+            anatomy=open_workfile_context.anatomy,
+        )
+        self._before_context_change(context_change_data)
+        # Also updates environment variables from the current context
+        self._set_current_context(context_change_data)
+        self._after_context_change(context_change_data)
+        self._emit_context_change_event(project_name, folder_path, task_name)
+
+        self._after_workfile_open(open_workfile_context)
+        self._emit_workfile_open_event(event_data)
 
     def save_workfile(self, filepath=None):
         if not filepath:

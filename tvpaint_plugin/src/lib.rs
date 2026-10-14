@@ -131,8 +131,14 @@ fn start_server(filter: Filter) {
         filter.warning("AYON: Can't determine directory for server file.");
         return;
     };
+    // TVPaint is single instance per executable, launcher compares it with
+    //   the executable it would launch
+    let executable = std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
     let info = json!({
         "pid": std::process::id(),
+        "executable": executable,
         "launch_id": std::env::var(LAUNCH_ID_ENV).ok(),
         "plugin_version": env!("CARGO_PKG_VERSION"),
         "started": std::time::SystemTime::now()
