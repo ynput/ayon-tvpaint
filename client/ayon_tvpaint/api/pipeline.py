@@ -155,6 +155,9 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
 
     # --- Workfile ---
     def open_workfile(self, filepath):
+        # TVPaint shows modal dialog for missing file which blocks it
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(f"Workfile does not exist: {filepath}")
         return execute_george(
             f"tv_LoadProject {george_string(george_path(filepath))}"
         )
@@ -223,9 +226,10 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         context = get_global_context()
         save_current_workfile_context(context)
 
-        # Execute george script to save workfile.
-        george_script = "tv_SaveProject {}".format(filepath.replace("\\", "/"))
-        return execute_george(george_script)
+        # TVPaint shows modal dialog if it can't create the file
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # Path is the rest of the line and must not be quoted
+        return execute_george(f"tv_SaveProject {george_path(filepath)}")
 
     def work_root(self, session):
         return session["AYON_WORKDIR"]

@@ -40,7 +40,9 @@ Methods handled by the plugin:
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `execute_george` | `[script]` | Output of the george script (UTF-8). |
+| `execute_george` | `[command]` | Output of the single-line george command. |
+| `execute_george_batch` | `[[command, ...]]` | Output of each command. All commands run in one tick, nothing runs if any command is invalid. |
+| `get_layer_ids` | none | Ids of all layers in the current clip (`tv_LayerGetID` until `none`). |
 | `define_menu` | `[{"title": str, "menu_items": [{"label", "help", "callback"}]}]` | `""` |
 | `get_server_info` | none | Content of the server file plus `host_client` (data of the registered host client, or `null`). |
 | `register_host` | `[{...}]` | `null`. Registers the connection as host client. Fails with `-32002` if another connection is registered. |
@@ -48,7 +50,20 @@ Methods handled by the plugin:
 
 When a menu button is clicked, the plugin sends a notification named after the button's `callback`, with empty `params`. The plugin does not wait for a response, so TVPaint never blocks on the client.
 
-`execute_george` and `define_menu` are queued and handled on TVPaint's main thread (on requester ticks), because SDK functions can't be called from other threads. The other methods don't touch TVPaint. They are handled in the server thread and work even while TVPaint is busy.
+`execute_george`, `execute_george_batch`, `get_layer_ids` and `define_menu` are queued and handled on TVPaint's main thread (on requester ticks), because SDK functions can't be called from other threads. The other methods don't touch TVPaint. They are handled in the server thread and work even while TVPaint is busy.
+
+## George commands
+
+TVPaint executes only the first line of a command sent by a plugin, and george variables, `PARSE` or control flow don't work. So the plugin refuses multiline commands, and loops or parsing are done by the caller. Use `execute_george_batch` to run many commands at once.
+
+Commands are converted to the system ANSI code page, which TVPaint uses on Windows. Commands with characters outside the code page are refused, because TVPaint would get a different path or text.
+
+Each command parses its arguments differently (tested with TVPaint 11.7):
+- `tv_SaveProject`, `tv_SaveImage` and `tv_LayerCreate` take the rest of the line as the value, so it must not be quoted.
+- Other strings (`tv_LoadProject`, `tv_LoadSequence`, `tv_SoundClipNew`, `tv_LayerRename`, `tv_WriteProjectString`, ...) must be in double quotes.
+- Keywords (`tv_LayerColor get`, `tv_Background color`) must not be quoted. Quoted keywords fail or are silently ignored.
+- Double quotes can't be passed inside a string.
+- Missing files or folders make TVPaint show a modal dialog, which blocks it and the request. Check paths before sending the command.
 
 ## Host client and reuse of running TVPaint
 

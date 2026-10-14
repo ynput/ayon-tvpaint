@@ -1,3 +1,5 @@
+import os
+
 from ayon_tvpaint.api import plugin
 from ayon_tvpaint.api.lib import (
     execute_george,
@@ -33,6 +35,9 @@ class ImportSound(plugin.Loader):
 
     def load(self, context, name, namespace, options):
         path = self.filepath_from_context(context)
+        # TVPaint shows modal dialog for missing file which blocks it
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Sound file does not exist: {path}")
         # Try to get sound clip info to check if we are in TVPaint that can
         #   load sound, it returns empty string if it can't
         clip_id = execute_george("tv_ClipCurrentID")

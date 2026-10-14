@@ -14,6 +14,7 @@ Arguments of george commands are parsed differently by each command:
 - it is not possible to pass double quotes inside of a string
 """
 
+import os
 import logging
 
 from .communication_server import CommunicationWrapper
@@ -594,9 +595,14 @@ def import_sequence(
         int: Id of created layer.
 
     Raises:
+        FileNotFoundError: File does not exist.
         RuntimeError: TVPaint failed to load the file.
 
     """
+    # TVPaint shows modal dialog for missing file which blocks it
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"File to load does not exist: {filepath}")
+
     command_parts = [
         "tv_LoadSequence", george_string(george_path(filepath))
     ]
@@ -608,15 +614,24 @@ def import_sequence(
         if enabled:
             command_parts.append(option)
 
-    result = execute_george(" ".join(command_parts), communicator) or ""
-    try:
-        layer_id = int(result.split(" ")[0])
-    except ValueError:
-        layer_id = -1
-    if layer_id < 0:
+    # Loaded layer becomes current layer, 'tv_LoadSequence' should return
+    #   id of the layer but returns '1' in TVPaint 11.7
+    outputs = execute_george_batch(
+        [
+            "tv_LayerCurrentID",
+            " ".join(command_parts),
+            "tv_LayerCurrentID",
+        ],
+        communicator
+    )
+    if len(outputs) != 3:
+        raise RuntimeError(f"TVPaint failed to load '{filepath}'.")
+    previous_layer_id, result, layer_id = outputs
+    if result.strip().startswith("-1") or layer_id == previous_layer_id:
         raise RuntimeError(
             f"TVPaint failed to load '{filepath}'. Output: {result}"
         )
+    layer_id = int(layer_id)
 
     execute_george(
         f"tv_LayerRename {layer_id} {george_string(layer_name)}",
