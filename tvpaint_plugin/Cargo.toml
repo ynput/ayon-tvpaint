@@ -1,0 +1,32 @@
+[package]
+name = "ayon-tvpaint-plugin"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.83"
+description = "TVPaint plugin running a JSON-RPC websocket server for AYON"
+license = "Apache-2.0"
+publish = false
+build = "build.rs"
+
+[lib]
+# TVPaint loads the plugin as 'AYONPlugin.dll' on Windows.
+name = "AYONPlugin"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Globalization"] }
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

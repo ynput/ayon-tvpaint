@@ -14,6 +14,7 @@ from ayon_tvpaint.api import (
     TVPaintHost,
     CommunicationWrapper,
 )
+from ayon_tvpaint.api.communication_server import open_in_running_tvpaint
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,10 @@ def safe_excepthook(*args):
 def main(launch_args):
     # Be sure server won't crash at any moment but just print traceback
     sys.excepthook = safe_excepthook
+
+    # Reuse TVPaint which is already running for the same project
+    if open_in_running_tvpaint(launch_args):
+        return
 
     # Create QtApplication for tools
     # - QApplicaiton is also main thread/event loop of the server
