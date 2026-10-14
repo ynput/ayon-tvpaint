@@ -1107,30 +1107,7 @@ class BaseCommunicator:
         log.info("Connected to TVPaint")
 
     def _on_client_connect(self):
-        self._initial_textfile_write()
-
-    def _initial_textfile_write(self):
-        """Show popup about Write to file at start of TVPaint."""
-        tmp_file = tempfile.NamedTemporaryFile(
-            mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-        )
-        tmp_file.close()
-        tmp_filepath = tmp_file.name.replace("\\", "/")
-        george_script = (
-            "tv_writetextfile \"strict\" \"append\" \"{}\" \"empty\""
-        ).format(tmp_filepath)
-
-        result = CommunicationWrapper.execute_george(george_script)
-
-        # Remote the file
-        os.remove(tmp_filepath)
-
-        if result is None:
-            log.warning(
-                "Host was probably closed before plugin was initialized."
-            )
-        elif result.lower() == "forbidden":
-            log.warning("User didn't confirm saving files.")
+        pass
 
     def client(self):
         if not self.is_connected:
@@ -1158,16 +1135,50 @@ class BaseCommunicator:
             log.warning("Connection to TVPaint was closed.")
 
     def execute_george(self, george_script):
-        """Execute passed goerge script in TVPaint."""
+        """Execute single line george command in TVPaint.
+
+        Returns:
+            Optional[str]: Output of the command, None if not connected.
+
+        """
         return self.send_request(
             "execute_george", [george_script]
         )
 
+    def execute_george_batch(self, commands):
+        """Execute single line george commands in TVPaint.
+
+        Commands are executed one after another in a single TVPaint tick.
+
+        Args:
+            commands (Iterable[str]): George commands.
+
+        Returns:
+            Optional[list[str]]: Output of each command, None if not
+                connected.
+
+        """
+        commands = list(commands)
+        if not commands:
+            return []
+        return self.send_request("execute_george_batch", [commands])
+
+    def get_layer_ids(self):
+        """Ids of all layers in current clip.
+
+        Returns:
+            Optional[list[int]]: Layer ids, None if not connected.
+
+        """
+        return self.send_request("get_layer_ids")
+
     def execute_george_through_file(self, george_script):
         """Execute george script with temp file.
 
-        Allows to execute multiline george script without stopping websocket
-        client.
+        Deprecated:
+            Use 'execute_george' or 'execute_george_batch' with single line
+            commands instead. Kept for george scripts which need variables
+            or control flow, e.g. scripts sent in worker jobs.
 
         On windows make sure script does not contain paths with backwards
         slashes in paths, TVPaint won't execute properly in that case.

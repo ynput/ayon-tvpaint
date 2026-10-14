@@ -55,8 +55,7 @@ class TVPaintWorkerCommunicator(BaseCommunicator):
             tmp_filepath = tmp_file.name.replace("\\", "/")
 
         shutil.copy(init_filepath, tmp_filepath)
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(tmp_filepath)
-        self.execute_george_through_file(george_script)
+        self.execute_george(f'tv_LoadProject "{tmp_filepath}"')
         self.execute_george("tv_projectclose")
         os.remove(tmp_filepath)
 

@@ -276,6 +276,8 @@ fn open_menu(filter: Filter) -> bool {
 fn handle_request(filter: Filter, request: &Request) -> Result<Value, RpcError> {
     match request.method.as_str() {
         "execute_george" => execute_george(filter, &request.params),
+        "execute_george_batch" => execute_george_batch(filter, &request.params),
+        "get_layer_ids" => get_layer_ids(filter),
         "define_menu" => {
             let menu =
                 parse_menu(&request.params).map_err(|error| RpcError::new(INVALID_PARAMS, error))?;
@@ -293,23 +295,93 @@ fn handle_request(filter: Filter, request: &Request) -> Result<Value, RpcError> 
     }
 }
 
-fn execute_george(filter: Filter, params: &Value) -> Result<Value, RpcError> {
-    let script = match params {
-        Value::Array(values) => values.first().and_then(Value::as_str),
-        Value::Object(values) => values.get("script").and_then(Value::as_str),
+/// Get positional argument or named argument from params.
+fn param<'a>(params: &'a Value, index: usize, name: &str) -> Option<&'a Value> {
+    match params {
+        Value::Array(values) => values.get(index),
+        Value::Object(values) => values.get(name),
         _ => None,
-    };
-    let Some(script) = script else {
-        return Err(RpcError::new(INVALID_PARAMS, "Expected george script string"));
-    };
-    let script = CString::new(script)
-        .map_err(|_| RpcError::new(INVALID_PARAMS, "George script contains NUL byte"))?;
-    let (output, success) = filter.send_cmd(&script);
+    }
+}
+
+/// Validate and convert george command for TVPaint.
+///
+/// TVPaint executes only the first line of the command, so multiline
+/// scripts are refused instead of silently skipping the other lines.
+fn prepare_command(command: &str) -> Result<CString, RpcError> {
+    let command = command.trim_end();
+    if command.contains(['\n', '\r']) {
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            format!(
+                "George command must be a single line, TVPaint ignores other lines: {command}"
+            ),
+        ));
+    }
+    encoding::to_tvpaint(command).map_err(|error| RpcError::new(INVALID_PARAMS, error))
+}
+
+/// Execute prepared george command and return its output.
+fn run_command(filter: Filter, command: &CString) -> String {
+    let (output, success) = filter.send_cmd(command);
     if !success {
-        eprintln!("AYON: George script failed: {}", script.to_string_lossy());
+        eprintln!("AYON: George command failed: {}", command.to_string_lossy());
     }
     // Output is returned even on failure, it may contain the error
-    Ok(Value::String(encoding::to_utf8(&output)))
+    encoding::to_utf8(&output)
+}
+
+fn execute_george(filter: Filter, params: &Value) -> Result<Value, RpcError> {
+    let Some(script) = param(params, 0, "script").and_then(Value::as_str) else {
+        return Err(RpcError::new(INVALID_PARAMS, "Expected george command string"));
+    };
+    let command = prepare_command(script)?;
+    Ok(Value::String(run_command(filter, &command)))
+}
+
+/// Execute george commands one after another and return their outputs.
+///
+/// All commands run during a single tick, so nothing (e.g. user changing
+/// current layer) happens between them. Nothing is executed if any
+/// command is invalid.
+fn execute_george_batch(filter: Filter, params: &Value) -> Result<Value, RpcError> {
+    let Some(commands) = param(params, 0, "commands").and_then(Value::as_array) else {
+        return Err(RpcError::new(INVALID_PARAMS, "Expected list of george commands"));
+    };
+    let commands = commands
+        .iter()
+        .map(|command| match command.as_str() {
+            Some(command) => prepare_command(command),
+            None => Err(RpcError::new(INVALID_PARAMS, "George command must be a string")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let outputs = commands
+        .iter()
+        .map(|command| Value::String(run_command(filter, command)))
+        .collect();
+    Ok(Value::Array(outputs))
+}
+
+/// Maximum number of layers 'get_layer_ids' looks for, protects from
+/// infinite loop if TVPaint changes output of 'tv_layergetid'.
+const MAX_LAYERS: usize = 100_000;
+
+/// Ids of all layers of current clip in their order.
+///
+/// George has no command to get number of layers, layers are listed with
+/// 'tv_layergetid' until it returns "none".
+fn get_layer_ids(filter: Filter) -> Result<Value, RpcError> {
+    let mut layer_ids = Vec::new();
+    for index in 0..MAX_LAYERS {
+        let command = prepare_command(&format!("tv_layergetid {index}"))?;
+        let output = run_command(filter, &command);
+        match output.trim().parse::<i64>() {
+            Ok(layer_id) => layer_ids.push(json!(layer_id)),
+            // "none" when there are no more layers
+            Err(_) => break,
+        }
+    }
+    Ok(Value::Array(layer_ids))
 }
 
 fn process_requests(filter: Filter) {

@@ -1,6 +1,5 @@
 import os
 import json
-import tempfile
 import logging
 
 import requests
@@ -29,7 +28,9 @@ from ayon_core.pipeline.context_tools import get_global_context
 
 from .lib import (
     execute_george,
-    execute_george_through_file
+    execute_george_batch,
+    george_path,
+    george_string,
 )
 from .communication_server import CommunicationWrapper, MainThreadItem
 
@@ -154,10 +155,9 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
 
     # --- Workfile ---
     def open_workfile(self, filepath):
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(
-            filepath.replace("\\", "/")
+        return execute_george(
+            f"tv_LoadProject {george_string(george_path(filepath))}"
         )
-        return execute_george_through_file(george_script)
 
     def open_workfile_in_context(
         self, filepath, project_name, folder_entity, task_entity
@@ -399,42 +399,12 @@ def get_workfile_metadata_string_for_keys(metadata_keys):
     if isinstance(metadata_keys, str):
         metadata_keys = [metadata_keys]
 
-    output_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
+    section = george_string(METADATA_SECTION)
+    outputs = execute_george_batch(
+        f'tv_ReadProjectString {section} {george_string(metadata_key)} ""'
+        for metadata_key in metadata_keys
     )
-    output_file.close()
-    output_filepath = output_file.name.replace("\\", "/")
-
-    george_script_parts = []
-    george_script_parts.append(
-        "output_path = \"{}\"".format(output_filepath)
-    )
-    # Store data for each index of metadata key
-    for metadata_key in metadata_keys:
-        george_script_parts.append(
-            "tv_readprojectstring \"{}\" \"{}\" \"\"".format(
-                METADATA_SECTION, metadata_key
-            )
-        )
-        george_script_parts.append(
-            "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' result"
-        )
-
-    # Execute the script
-    george_script = "\n".join(george_script_parts)
-    execute_george_through_file(george_script)
-
-    # Load data from temp file
-    with open(output_filepath, "r") as stream:
-        file_content = stream.read()
-
-    # Remove `\n` from content
-    output_string = file_content.replace("\n", "")
-
-    # Delete temp file
-    os.remove(output_filepath)
-
-    return output_string
+    return "".join(outputs)
 
 
 def get_workfile_metadata_string(metadata_key):
@@ -522,22 +492,21 @@ def write_workfile_metadata(metadata_key, value):
     chunks = split_metadata_string(value)
     chunks_len = len(chunks)
 
-    write_template = "tv_writeprojectstring \"{}\" \"{}\" \"{}\""
-    george_script_parts = []
+    section = george_string(METADATA_SECTION)
     # Add information about chunks length to metadata key itself
-    george_script_parts.append(
-        write_template.format(METADATA_SECTION, metadata_key, chunks_len)
-    )
+    commands = [
+        f"tv_WriteProjectString {section}"
+        f" {george_string(metadata_key)} {george_string(chunks_len)}"
+    ]
     # Add chunk values to indexed metadata keys
     for idx, chunk_value in enumerate(chunks):
-        sub_key = "{}{}".format(metadata_key, idx)
-        george_script_parts.append(
-            write_template.format(METADATA_SECTION, sub_key, chunk_value)
+        sub_key = f"{metadata_key}{idx}"
+        commands.append(
+            f"tv_WriteProjectString {section}"
+            f" {george_string(sub_key)} {george_string(chunk_value)}"
         )
 
-    george_script = "\n".join(george_script_parts)
-
-    return execute_george_through_file(george_script)
+    execute_george_batch(commands)
 
 
 def get_current_workfile_context():

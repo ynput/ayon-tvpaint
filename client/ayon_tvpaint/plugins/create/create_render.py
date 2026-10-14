@@ -58,7 +58,8 @@ from ayon_tvpaint.api.lib import (
     get_layers_data,
     get_groups_data,
     execute_george,
-    execute_george_through_file,
+    execute_george_batch,
+    george_string,
 )
 
 RENDER_LAYER_DETAILED_DESCRIPTIONS = (
@@ -126,9 +127,10 @@ class CreateRenderlayer(TVPaintCreator):
     icon = "fa5.images"
 
     # George script to change color group
+    # 'name' is expected to be wrapped with 'george_string'
     rename_script_template = (
-        "tv_layercolor \"setcolor\""
-        " {clip_id} {group_id} {r} {g} {b} \"{name}\""
+        "tv_layercolor setcolor"
+        " {clip_id} {group_id} {r} {g} {b} {name}"
     )
     # Order to be executed before Render Pass creator
     order = 90
@@ -258,9 +260,9 @@ class CreateRenderlayer(TVPaintCreator):
             r=group_item["red"],
             g=group_item["green"],
             b=group_item["blue"],
-            name=group_name
+            name=george_string(group_name)
         )
-        execute_george_through_file(rename_script)
+        execute_george(rename_script)
 
         self.log.info((
             f"Name of group with index {group_id}"
@@ -364,11 +366,10 @@ class CreateRenderlayer(TVPaintCreator):
                 r=group["red"],
                 g=group["green"],
                 b=group["blue"],
-                name=variant
+                name=george_string(variant)
             ))
 
-        if grg_script_lines:
-            execute_george_through_file("\n".join(grg_script_lines))
+        execute_george_batch(grg_script_lines)
 
     def _update_renderpass_groups(self):
         render_layer_instances = {}
@@ -403,12 +404,11 @@ class CreateRenderlayer(TVPaintCreator):
 
             for layer_name in layer_names:
                 george_lines.extend(
-                    f"tv_layercolor \"set\" {layer['layer_id']} {group_id}"
+                    f"tv_layercolor set {layer['layer_id']} {group_id}"
                     for layer in layers_by_name[layer_name]
                     if layer["group_id"] != group_id
                 )
-        if george_lines:
-            execute_george_through_file("\n".join(george_lines))
+        execute_george_batch(george_lines)
 
 
 class CreateRenderPass(TVPaintCreator):
@@ -728,11 +728,10 @@ class CreateRenderPass(TVPaintCreator):
                 f"{','.join([layer['name'] for layer in filtered_layers])}"
                 f" to {group_id}"
             ))
-            george_lines = [
-                f"tv_layercolor \"set\" {layer['layer_id']} {group_id}"
+            execute_george_batch(
+                f"tv_layercolor set {layer['layer_id']} {group_id}"
                 for layer in filtered_layers
-            ]
-            execute_george_through_file("\n".join(george_lines))
+            )
 
     def _remove_and_filter_instances(self, instances_to_remove):
         instances_data = self.host.list_instances()
@@ -1040,20 +1039,19 @@ class TVPaintAutoDetectRenderCreator(TVPaintCreator):
         for group_id, group_name in new_group_name_by_id.items():
             group: dict[str, Any] = groups_by_id[group_id]
             grg_line: str = (
-                "tv_layercolor \"setcolor\" {} {} {} {} {} \"{}\""
+                "tv_layercolor setcolor {} {} {} {} {} {}"
             ).format(
                 group["clip_id"],
                 group_id,
                 group["red"],
                 group["green"],
                 group["blue"],
-                group_name
+                george_string(group_name)
             )
             grg_lines.append(grg_line)
             group["name"] = group_name
 
-        if grg_lines:
-            execute_george_through_file("\n".join(grg_lines))
+        execute_george_batch(grg_lines)
 
     def _prepare_render_layer(
         self,

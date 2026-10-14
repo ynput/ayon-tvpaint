@@ -1,8 +1,8 @@
-import os
-import tempfile
 from ayon_tvpaint.api import plugin
 from ayon_tvpaint.api.lib import (
-    execute_george_through_file,
+    execute_george,
+    george_path,
+    george_string,
 )
 
 
@@ -31,63 +31,21 @@ class ImportSound(plugin.Loader):
     icon = "image"
     color = "white"
 
-    import_script_lines = (
-        "sound_path = '\"'\"{}\"'\"'",
-        "output_path = \"{}\"",
-        # Try to get sound clip info to check if we are in TVPaint that can
-        # load sound
-        "tv_clipcurrentid",
-        "clip_id = result",
-        "tv_soundclipinfo clip_id 0",
-        "IF CMP(result,\"\")==1",
-        (
-            "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"'"
-            " 'success|'"
-        ),
-        "EXIT",
-        "END",
-
-        "tv_soundclipnew sound_path",
-        "line = 'success|'result",
-        "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' line"
-    )
-
     def load(self, context, name, namespace, options):
-        # Create temp file for output
-        output_file = tempfile.NamedTemporaryFile(
-            mode="w", prefix="ayon_tvp_", suffix=".txt", delete=False
-        )
-        output_file.close()
-        output_filepath = output_file.name.replace("\\", "/")
+        path = self.filepath_from_context(context)
+        # Try to get sound clip info to check if we are in TVPaint that can
+        #   load sound, it returns empty string if it can't
+        clip_id = execute_george("tv_ClipCurrentID")
+        clip_info = execute_george(f"tv_SoundClipInfo {clip_id} 0")
+        if clip_info == "":
+            success = ""
+        else:
+            success = execute_george(
+                f"tv_SoundClipNew {george_string(george_path(path))}"
+            )
+        if success is not None:
+            success = success.strip()
 
-        # Prepare george script
-        path = self.filepath_from_context(context).replace("\\", "/")
-        import_script = "\n".join(self.import_script_lines)
-        george_script = import_script.format(
-            path,
-            output_filepath
-        )
-        self.log.info("*** George script:\n{}\n***".format(george_script))
-        # Execute geoge script
-        execute_george_through_file(george_script)
-
-        # Read output file
-        lines = []
-        with open(output_filepath, "r") as file_stream:
-            for line in file_stream:
-                line = line.rstrip()
-                if line:
-                    lines.append(line)
-
-        # Clean up temp file
-        os.remove(output_filepath)
-
-        output = {}
-        for line in lines:
-            key, value = line.split("|")
-            output[key] = value
-
-        success = output.get("success")
         # Successfully loaded sound
         if success == "0":
             return
