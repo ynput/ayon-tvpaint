@@ -32,6 +32,35 @@ def _show_error(message):
     QtWidgets.QMessageBox.critical(None, "AYON TVPaint", message)
 
 
+def _confirm_incompatible_bundle(host_client):
+    """Warn that running TVPaint uses different bundle or variant.
+
+    Returns:
+        bool: User chose to ignore the warning and use the running TVPaint.
+
+    """
+    current = get_host_client_info()
+    message = (
+        "TVPaint is already running with AYON bundle"
+        f" '{host_client.get('bundle_name')}'"
+        f" ({host_client.get('variant')}),"
+        f" but it is launched with bundle '{current['bundle_name']}'"
+        f" ({current['variant']}).\n\n"
+        "Ignore to open the workfile in the running TVPaint anyway. It will"
+        " use the addons of the running bundle.\n"
+        "Cancel and close TVPaint to launch it with the new bundle."
+    )
+    log.warning(message)
+    result = QtWidgets.QMessageBox.warning(
+        None,
+        "AYON TVPaint",
+        message,
+        QtWidgets.QMessageBox.Ignore | QtWidgets.QMessageBox.Cancel,
+        QtWidgets.QMessageBox.Cancel,
+    )
+    return result == QtWidgets.QMessageBox.Ignore
+
+
 def _open_in_running_tvpaint(running_tvpaint, launch_args):
     """Let AYON process controlling running TVPaint open the workfile.
 
@@ -39,16 +68,11 @@ def _open_in_running_tvpaint(running_tvpaint, launch_args):
         int: Exit code.
 
     """
-    host_client = running_tvpaint.host_client
-    if not running_tvpaint.is_compatible():
-        current = get_host_client_info()
-        _show_error(
-            "TVPaint is already running with AYON bundle"
-            f" '{host_client.get('bundle_name')}'"
-            f" ({host_client.get('variant')}).\n\n"
-            "Close TVPaint before launching it with bundle"
-            f" '{current['bundle_name']}' ({current['variant']})."
-        )
+    if (
+        not running_tvpaint.is_compatible()
+        and not _confirm_incompatible_bundle(running_tvpaint.host_client)
+    ):
+        log.info("Launch was cancelled.")
         return 1
 
     workfile_path = get_workfile_from_launch_args(launch_args)

@@ -61,7 +61,7 @@ TVPaint is a single-instance application: running its executable again only pass
 | none | Launch TVPaint. |
 | no host client (e.g. started without AYON) | Attach to it and become the host client, open the workfile from the launch arguments. |
 | host client with the same bundle, studio bundle and variant | Call `send_to_host` with method `open_workfile` and params `{"workfile_path", "project_name", "folder_path", "task_name"}`, then exit. |
-| host client with a different bundle or variant | Show an error asking to close TVPaint first. |
+| host client with a different bundle or variant | Show a warning. Ignore does the same as above, using the running bundle's addons. Cancel ends the launch. |
 
 The project doesn't have to match. TVPaint's current context, project included, is stored in the workfile metadata. The host client opens the workfile with `TVPaintHost.open_workfile_in_context`, which stores the new context in the opened workfile's metadata. It mirrors ayon-core's `open_workfile_with_context`, with the same hooks and events, but takes the project as an argument.
 
