@@ -34,6 +34,7 @@ pub const PARSE_ERROR: i64 = -32700;
 pub const INVALID_REQUEST: i64 = -32600;
 pub const METHOD_NOT_FOUND: i64 = -32601;
 pub const INVALID_PARAMS: i64 = -32602;
+pub const INTERNAL_ERROR: i64 = -32603;
 /// 'send_to_host' called but no host client is registered.
 pub const NO_HOST_CLIENT: i64 = -32001;
 /// 'register_host' called but other connection is already registered.

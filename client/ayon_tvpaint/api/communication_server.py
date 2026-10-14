@@ -1172,6 +1172,15 @@ class BaseCommunicator:
         """
         return self.send_request("get_layer_ids")
 
+    def get_group_count(self):
+        """Number of color groups, without the default group 0.
+
+        Returns:
+            Optional[int]: Number of groups, None if not connected.
+
+        """
+        return self.send_request("get_group_count")
+
     def execute_george_through_file(self, george_script):
         """Execute george script with temp file.
 

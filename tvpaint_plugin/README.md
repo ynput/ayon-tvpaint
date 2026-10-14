@@ -43,6 +43,7 @@ Methods handled by the plugin:
 | `execute_george` | `[command]` | Output of the single-line george command. |
 | `execute_george_batch` | `[[command, ...]]` | Output of each command. All commands run in one tick, nothing runs if any command is invalid. |
 | `get_layer_ids` | none | Ids of all layers in the current clip (`tv_LayerGetID` until `none`). |
+| `get_group_count` | none | Number of color groups without the default group 0 (26 in TVPaint 11.7, more in newer versions). |
 | `define_menu` | `[{"title": str, "menu_items": [{"label", "help", "callback"}]}]` | `""` |
 | `get_server_info` | none | Content of the server file plus `host_client` (data of the registered host client, or `null`). |
 | `register_host` | `[{...}]` | `null`. Registers the connection as host client. Fails with `-32002` if another connection is registered. |
@@ -50,7 +51,7 @@ Methods handled by the plugin:
 
 When a menu button is clicked, the plugin sends a notification named after the button's `callback`, with empty `params`. The plugin does not wait for a response, so TVPaint never blocks on the client.
 
-`execute_george`, `execute_george_batch`, `get_layer_ids` and `define_menu` are queued and handled on TVPaint's main thread (on requester ticks), because SDK functions can't be called from other threads. The other methods don't touch TVPaint. They are handled in the server thread and work even while TVPaint is busy.
+`execute_george`, `execute_george_batch`, `get_layer_ids`, `get_group_count` and `define_menu` are queued and handled on TVPaint's main thread (on requester ticks), because SDK functions can't be called from other threads. The other methods don't touch TVPaint. They are handled in the server thread and work even while TVPaint is busy.
 
 ## George commands
 

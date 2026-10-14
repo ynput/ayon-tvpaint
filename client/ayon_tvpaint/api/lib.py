@@ -316,12 +316,31 @@ def groups_data(communicator=None):
     return get_groups_data(communicator)
 
 
+def get_group_count(communicator=None):
+    """Number of color groups, without the default group 0.
+
+    TVPaint 11.7 has 26 groups, newer versions have more.
+
+    Returns:
+        int: Number of groups.
+
+    """
+    if not communicator:
+        communicator = CommunicationWrapper.communicator
+    return communicator.get_group_count() or 0
+
+
 def get_groups_data(communicator=None):
-    """Information about groups from current workfile."""
-    # There are 26 groups which is ATM maximum possible (in 11.7)
-    # - ref: https://www.tvpaint.com/forum/viewtopic.php?t=13880
+    """Information about groups from current workfile.
+
+    Default group 0 is not included.
+    """
+    group_count = get_group_count(communicator)
     outputs = execute_george_batch(
-        [f"tv_LayerColor getcolor 0 {idx}" for idx in range(1, 27)],
+        [
+            f"tv_LayerColor getcolor 0 {idx}"
+            for idx in range(1, group_count + 1)
+        ],
         communicator
     )
     output = []

@@ -278,6 +278,7 @@ fn handle_request(filter: Filter, request: &Request) -> Result<Value, RpcError> 
         "execute_george" => execute_george(filter, &request.params),
         "execute_george_batch" => execute_george_batch(filter, &request.params),
         "get_layer_ids" => get_layer_ids(filter),
+        "get_group_count" => get_group_count(filter),
         "define_menu" => {
             let menu =
                 parse_menu(&request.params).map_err(|error| RpcError::new(INVALID_PARAMS, error))?;
@@ -382,6 +383,50 @@ fn get_layer_ids(filter: Filter) -> Result<Value, RpcError> {
         }
     }
     Ok(Value::Array(layer_ids))
+}
+
+/// Maximum number of color groups 'get_group_count' looks for.
+const MAX_GROUPS: usize = 10_000;
+
+/// Parse output of 'tv_LayerColor getcolor' to color and name.
+///
+/// Output looks like '0 1 250 0 0 "A"', name can contain spaces.
+fn parse_group_color(output: &str) -> Option<(&str, &str)> {
+    let mut parts = output.trim().splitn(3, ' ');
+    // Skip clip id and group index
+    parts.next()?;
+    parts.next()?;
+    let rest = parts.next()?;
+    let name_start = rest.find('"')?;
+    Some((rest[..name_start].trim(), rest[name_start..].trim_matches('"')))
+}
+
+/// Number of color groups in current clip, without the default group 0.
+///
+/// TVPaint 11.7 has 26 groups, newer versions have more. George has no
+/// command to get the count, and 'tv_LayerColor getcolor' with an index
+/// out of range returns color of the default group 0 with empty name.
+fn get_group_count(filter: Filter) -> Result<Value, RpcError> {
+    let getcolor = |index: usize| -> Result<String, RpcError> {
+        let command = prepare_command(&format!("tv_LayerColor getcolor 0 {index}"))?;
+        Ok(run_command(filter, &command))
+    };
+    let default_output = getcolor(0)?;
+    let Some((default_color, _)) = parse_group_color(&default_output) else {
+        return Err(RpcError::new(
+            server::INTERNAL_ERROR,
+            format!("Unexpected output of 'tv_LayerColor getcolor': {default_output}"),
+        ));
+    };
+    let default_color = default_color.to_string();
+    for index in 1..MAX_GROUPS {
+        let output = getcolor(index)?;
+        match parse_group_color(&output) {
+            Some((color, name)) if !(name.is_empty() && color == default_color) => {}
+            _ => return Ok(json!(index - 1)),
+        }
+    }
+    Ok(json!(MAX_GROUPS - 1))
 }
 
 fn process_requests(filter: Filter) {
@@ -591,4 +636,21 @@ pub unsafe extern "system" fn PI_Finish(_filter: *mut PIFilter) {}
 #[no_mangle]
 pub unsafe extern "system" fn PI_Work(_filter: *mut PIFilter) -> c_int {
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_group_color;
+
+    #[test]
+    fn group_color_is_parsed() {
+        assert_eq!(parse_group_color(r#"0 1 250 0 0 "A""#), Some(("250 0 0", "A")));
+        assert_eq!(
+            parse_group_color(r#"1046 3 10 20 30 "render layer""#),
+            Some(("10 20 30", "render layer"))
+        );
+        // Index out of range in TVPaint 11.7
+        assert_eq!(parse_group_color(r#"0 27 72 72 72 """#), Some(("72 72 72", "")));
+        assert_eq!(parse_group_color("error"), None);
+    }
 }
