@@ -1,6 +1,5 @@
 import os
 import json
-import tempfile
 import logging
 
 import requests
@@ -9,7 +8,15 @@ import pyblish.api
 
 from ayon_tvpaint import TVPAINT_ROOT_DIR
 
-from ayon_core.host import HostBase, IWorkfileHost, ILoadHost, IPublishHost
+from ayon_core.host import (
+    HostBase,
+    IWorkfileHost,
+    ILoadHost,
+    IPublishHost,
+    ContextChangeData,
+    ContextChangeReason,
+)
+from ayon_core.host.interfaces import get_open_workfile_context
 from ayon_core.settings import get_current_project_settings
 from ayon_core.lib import register_event_callback
 from ayon_core.pipeline import (
@@ -21,7 +28,9 @@ from ayon_core.pipeline.context_tools import get_global_context
 
 from .lib import (
     execute_george,
-    execute_george_through_file
+    execute_george_batch,
+    george_path,
+    george_string,
 )
 from .communication_server import CommunicationWrapper, MainThreadItem
 
@@ -146,10 +155,70 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
 
     # --- Workfile ---
     def open_workfile(self, filepath):
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(
-            filepath.replace("\\", "/")
+        # TVPaint shows modal dialog for missing file which blocks it
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(f"Workfile does not exist: {filepath}")
+        return execute_george(
+            f"tv_LoadProject {george_string(george_path(filepath))}"
         )
-        return execute_george_through_file(george_script)
+
+    def open_workfile_in_context(
+        self, filepath, project_name, folder_entity, task_entity
+    ):
+        """Open workfile in context which can be of a different project.
+
+        Current context of TVPaint is stored in workfile metadata, so the
+        project changes once the opened workfile has the context stored.
+        Mirrors 'open_workfile_with_context' which always uses the current
+        project.
+
+        Args:
+            filepath (str): Path to workfile.
+            project_name (str): Project name.
+            folder_entity (dict[str, Any]): Folder entity.
+            task_entity (dict[str, Any]): Task entity.
+
+        """
+        open_workfile_context = get_open_workfile_context(
+            project_name,
+            filepath,
+            folder_entity,
+            task_entity,
+            prepared_data=None,
+        )
+        folder_path = folder_entity["path"]
+        task_name = task_entity["name"]
+
+        os.environ["AYON_WORKDIR"] = os.path.dirname(filepath)
+        event_data = self._get_workfile_event_data(
+            project_name, folder_entity, task_entity, filepath
+        )
+        self._before_workfile_open(open_workfile_context)
+        self._emit_workfile_open_event(event_data, after_open=False)
+
+        self.open_workfile(filepath)
+
+        # Context of the opened workfile becomes the current context
+        save_current_workfile_context({
+            "project_name": project_name,
+            "folder_path": folder_path,
+            "task_name": task_name,
+        })
+        context_change_data = ContextChangeData(
+            project_entity=open_workfile_context.project_entity,
+            folder_entity=folder_entity,
+            task_entity=task_entity,
+            reason=ContextChangeReason.workfile_open,
+            anatomy=open_workfile_context.anatomy,
+        )
+        self._before_context_change(context_change_data)
+        # Also updates environment variables from the current context
+        self._set_current_context(context_change_data)
+        self._after_context_change(context_change_data)
+        self._emit_context_change_event(project_name, folder_path, task_name)
+
+        self._after_workfile_open(open_workfile_context)
+        self._emit_workfile_open_event(event_data)
 
     def save_workfile(self, filepath=None):
         if not filepath:
@@ -157,9 +226,10 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         context = get_global_context()
         save_current_workfile_context(context)
 
-        # Execute george script to save workfile.
-        george_script = "tv_SaveProject {}".format(filepath.replace("\\", "/"))
-        return execute_george(george_script)
+        # TVPaint shows modal dialog if it can't create the file
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # Path is the rest of the line and must not be quoted
+        return execute_george(f"tv_SaveProject {george_path(filepath)}")
 
     def work_root(self, session):
         return session["AYON_WORKDIR"]
@@ -333,42 +403,12 @@ def get_workfile_metadata_string_for_keys(metadata_keys):
     if isinstance(metadata_keys, str):
         metadata_keys = [metadata_keys]
 
-    output_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
+    section = george_string(METADATA_SECTION)
+    outputs = execute_george_batch(
+        f'tv_ReadProjectString {section} {george_string(metadata_key)} ""'
+        for metadata_key in metadata_keys
     )
-    output_file.close()
-    output_filepath = output_file.name.replace("\\", "/")
-
-    george_script_parts = []
-    george_script_parts.append(
-        "output_path = \"{}\"".format(output_filepath)
-    )
-    # Store data for each index of metadata key
-    for metadata_key in metadata_keys:
-        george_script_parts.append(
-            "tv_readprojectstring \"{}\" \"{}\" \"\"".format(
-                METADATA_SECTION, metadata_key
-            )
-        )
-        george_script_parts.append(
-            "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' result"
-        )
-
-    # Execute the script
-    george_script = "\n".join(george_script_parts)
-    execute_george_through_file(george_script)
-
-    # Load data from temp file
-    with open(output_filepath, "r") as stream:
-        file_content = stream.read()
-
-    # Remove `\n` from content
-    output_string = file_content.replace("\n", "")
-
-    # Delete temp file
-    os.remove(output_filepath)
-
-    return output_string
+    return "".join(outputs)
 
 
 def get_workfile_metadata_string(metadata_key):
@@ -456,22 +496,21 @@ def write_workfile_metadata(metadata_key, value):
     chunks = split_metadata_string(value)
     chunks_len = len(chunks)
 
-    write_template = "tv_writeprojectstring \"{}\" \"{}\" \"{}\""
-    george_script_parts = []
+    section = george_string(METADATA_SECTION)
     # Add information about chunks length to metadata key itself
-    george_script_parts.append(
-        write_template.format(METADATA_SECTION, metadata_key, chunks_len)
-    )
+    commands = [
+        f"tv_WriteProjectString {section}"
+        f" {george_string(metadata_key)} {george_string(chunks_len)}"
+    ]
     # Add chunk values to indexed metadata keys
     for idx, chunk_value in enumerate(chunks):
-        sub_key = "{}{}".format(metadata_key, idx)
-        george_script_parts.append(
-            write_template.format(METADATA_SECTION, sub_key, chunk_value)
+        sub_key = f"{metadata_key}{idx}"
+        commands.append(
+            f"tv_WriteProjectString {section}"
+            f" {george_string(sub_key)} {george_string(chunk_value)}"
         )
 
-    george_script = "\n".join(george_script_parts)
-
-    return execute_george_through_file(george_script)
+    execute_george_batch(commands)
 
 
 def get_current_workfile_context():

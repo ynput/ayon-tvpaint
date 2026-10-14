@@ -5,7 +5,9 @@ from ayon_core.pipeline import registered_host
 from ayon_tvpaint.api import plugin
 from ayon_tvpaint.api.lib import (
     get_layers_data,
-    execute_george_through_file,
+    execute_george_batch,
+    george_string,
+    import_sequence,
 )
 from ayon_tvpaint.api.pipeline import (
     write_workfile_metadata,
@@ -26,13 +28,6 @@ class LoadImage(plugin.Loader):
     order = 1
     icon = "image"
     color = "white"
-
-    import_script = (
-        "filepath = '\"'\"{}\"'\"'\n"
-        "layer_name = \"{}\"\n"
-        "tv_loadsequence filepath {}PARSE layer_id\n"
-        "tv_layerrename layer_id layer_name"
-    )
 
     defaults = {
         "stretch": True,
@@ -68,48 +63,25 @@ class LoadImage(plugin.Loader):
         timestretch = options.get("timestretch", self.defaults["timestretch"])
         preload = options.get("preload", self.defaults["preload"])
 
-        load_options = []
-        if stretch:
-            load_options.append("\"STRETCH\"")
-        if timestretch:
-            load_options.append("\"TIMESTRETCH\"")
-        if preload:
-            load_options.append("\"PRELOAD\"")
-
-        load_options_str = ""
-        for load_option in load_options:
-            load_options_str += (load_option + " ")
-
         # Prepare layer name
         folder_name = context["folder"]["name"]
         product_name = context["product"]["name"]
         layer_name = self.get_unique_layer_name(folder_name, product_name)
 
-        path = self.filepath_from_context(context)
-
-        # Fill import script with filename and layer name
-        # - filename mus not contain backwards slashes
-        george_script = self.import_script.format(
-            path.replace("\\", "/"),
+        layer_id = import_sequence(
+            self.filepath_from_context(context),
             layer_name,
-            load_options_str
+            stretch=stretch,
+            timestretch=timestretch,
+            preload=preload,
         )
-
-        execute_george_through_file(george_script)
-
-        loaded_layer = None
-        layers = get_layers_data()
-        for layer in layers:
-            if layer["name"] == layer_name:
-                loaded_layer = layer
-                break
-
-        if loaded_layer is None:
+        loaded_layers = get_layers_data(layer_id)
+        if not loaded_layers:
             raise AssertionError(
-                "Loading probably failed during execution of george script."
+                f"Loaded layer with id '{layer_id}' was not found."
             )
 
-        layer_names = [loaded_layer["name"]]
+        layer_names = [loaded_layers[0]["name"]]
         namespace = namespace or layer_name
         return containerise(
             name=name,
@@ -163,12 +135,10 @@ class LoadImage(plugin.Loader):
             self.log.warning("No layers to delete.")
             return
 
-        george_script_lines = []
-        for layer_id in layer_ids_to_remove:
-            line = "tv_layerkill {}".format(layer_id)
-            george_script_lines.append(line)
-        george_script = "\n".join(george_script_lines)
-        execute_george_through_file(george_script)
+        execute_george_batch(
+            f"tv_LayerKill {layer_id}"
+            for layer_id in layer_ids_to_remove
+        )
 
     def _remove_container(self, container):
         if not container:
@@ -290,7 +260,7 @@ class LoadImage(plugin.Loader):
         # - all old layers must be under same group
         if new_group_id is not None and new_group_id > 0:
             for layer in new_layers:
-                line = "tv_layercolor \"set\" {} {}".format(
+                line = "tv_layercolor set {} {}".format(
                     layer["layer_id"], new_group_id
                 )
                 george_script_lines.append(line)
@@ -300,8 +270,8 @@ class LoadImage(plugin.Loader):
         if len(old_layers) == 1 and len(new_layers) == 1:
             layer_name = old_layers[0]["name"]
             george_script_lines.append(
-                "tv_layerrename {} \"{}\"".format(
-                    new_layers[0]["layer_id"], layer_name
+                "tv_layerrename {} {}".format(
+                    new_layers[0]["layer_id"], george_string(layer_name)
                 )
             )
 
@@ -314,7 +284,4 @@ class LoadImage(plugin.Loader):
                 "tv_layermove {}".format(new_start_position)
             ])
 
-        # Execute george scripts if there are any
-        if george_script_lines:
-            george_script = "\n".join(george_script_lines)
-            execute_george_through_file(george_script)
+        execute_george_batch(george_script_lines)

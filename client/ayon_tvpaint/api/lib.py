@@ -1,23 +1,96 @@
+"""George commands
+
+Commands are sent to TVPaint one by one, each must be a single line. George
+script features like variables, 'PARSE' or loops are not available, the
+logic is done in python. Use 'execute_george_batch' to execute multiple
+commands at once.
+
+Arguments of george commands are parsed differently by each command:
+- file path of 'tv_SaveProject' and 'tv_SaveImage' is the rest of the line,
+    it must not be quoted
+- other strings (names, paths in 'tv_LoadProject', 'tv_LoadSequence', ...)
+    must be wrapped with double quotes, use 'george_string'
+- keywords like 'set' in 'tv_LayerColor' must not be quoted
+- it is not possible to pass double quotes inside of a string
+"""
+
 import os
 import logging
-import tempfile
 
 from .communication_server import CommunicationWrapper
 
 log = logging.getLogger(__name__)
 
 
+def george_string(value):
+    """Wrap value into double quotes to be passed as one george argument.
+
+    Args:
+        value (Any): Value to pass, converted to string.
+
+    Returns:
+        str: Value in double quotes.
+
+    Raises:
+        ValueError: Value can't be passed to george command.
+
+    """
+    value = str(value)
+    if '"' in value or "\n" in value or "\r" in value:
+        raise ValueError(
+            f"George string can't contain double quotes or new lines: {value}"
+        )
+    return f'"{value}"'
+
+
+def george_path(path):
+    """Path with forward slashes, TVPaint can't handle backslashes."""
+    return path.replace("\\", "/")
+
+
 def execute_george(george_script, communicator=None):
+    """Execute single line george command.
+
+    Args:
+        george_script (str): George command.
+        communicator (Optional[BaseCommunicator]): Communicator.
+
+    Returns:
+        Optional[str]: Output of the command.
+
+    """
     if not communicator:
         communicator = CommunicationWrapper.communicator
     return communicator.execute_george(george_script)
 
 
+def execute_george_batch(commands, communicator=None):
+    """Execute multiple single line george commands.
+
+    All commands are executed during a single TVPaint tick, so nothing
+    happens between them.
+
+    Args:
+        commands (Iterable[str]): George commands.
+        communicator (Optional[BaseCommunicator]): Communicator.
+
+    Returns:
+        list[str]: Output of each command.
+
+    """
+    if not communicator:
+        communicator = CommunicationWrapper.communicator
+    outputs = communicator.execute_george_batch(commands)
+    if outputs is None:
+        return []
+    return outputs
+
+
 def execute_george_through_file(george_script, communicator=None):
     """Execute george script with temp file.
 
-    Allows to execute multiline george script without stopping websocket
-    client.
+    Deprecated:
+        Use 'execute_george' or 'execute_george_batch' instead.
 
     On windows make sure script does not contain paths with backwards
     slashes in paths, TVPaint won't execute properly in that case.
@@ -31,8 +104,80 @@ def execute_george_through_file(george_script, communicator=None):
     return communicator.execute_george_through_file(george_script)
 
 
+def get_layer_ids(communicator=None):
+    """Ids of all layers in current clip.
+
+    Returns:
+        list[int]: Layer ids in order of layers.
+
+    """
+    if not communicator:
+        communicator = CommunicationWrapper.communicator
+    return communicator.get_layer_ids() or []
+
+
+def _unquote(value):
+    if len(value) > 1 and value.startswith('"') and value.endswith('"'):
+        return value[1:-1]
+    return value
+
+
+def parse_layer_info(layer_id, group_id, layer_info, current_layer_id):
+    """Parse output of 'tv_LayerInfo' to layer data.
+
+    Args:
+        layer_id (int): Layer id.
+        group_id (str): Output of 'tv_LayerColor get'.
+        layer_info (str): Output of 'tv_LayerInfo'.
+        current_layer_id (str): Output of 'tv_LayerCurrentID'.
+
+    Returns:
+        dict[str, Any]: Layer data.
+
+    """
+    # Example: 'ON 0 0 "layer name" Sequence 0 10 0 0 0 1 OFF'
+    # - name is in quotes and can contain spaces
+    visible, position, _opacity, rest = layer_info.split(" ", 3)
+    (
+        name,
+        layer_type,
+        frame_start,
+        frame_end,
+        prelighttable,
+        postlighttable,
+        selected,
+        editable,
+        sencil_state,
+    ) = rest.rsplit(" ", 8)
+    is_current = str(layer_id) == current_layer_id.strip()
+    return {
+        "layer_id": int(layer_id),
+        "group_id": int(group_id),
+        "visible": visible == "ON",
+        "position": int(position),
+        # Opacity from 'tv_layerinfo' is always set to '0' so it's unusable
+        # "opacity": int(opacity),
+        "name": _unquote(name),
+        "type": layer_type,
+        "frame_start": int(frame_start),
+        "frame_end": int(frame_end),
+        "prelighttable": prelighttable == "1",
+        "postlighttable": postlighttable == "1",
+        # Current layer is always selected
+        "selected": selected == "1" or is_current,
+        "editable": editable == "1",
+        "sencil_state": sencil_state,
+        "is_current": is_current,
+    }
+
+
 def parse_layers_data(data):
-    """Parse layers data loaded in 'get_layers_data'."""
+    """Parse layers data in format of old george script.
+
+    Deprecated:
+        Data are not stored to a file anymore, use 'get_layers_data'.
+
+    """
     layers = []
     layers_raw = data.split("\n")
     for layer_raw in layers_raw:
@@ -50,8 +195,6 @@ def parse_layers_data(data):
             "group_id": int(group_id),
             "visible": visible == "ON",
             "position": int(position),
-            # Opacity from 'tv_layerinfo' is always set to '0' so it's unusable
-            # "opacity": int(opacity),
             "name": name,
             "type": layer_type,
             "frame_start": int(frame_start),
@@ -67,101 +210,58 @@ def parse_layers_data(data):
     return layers
 
 
-def get_layers_data_george_script(output_filepath, layer_ids=None):
-    """Prepare george script which will collect all layers from workfile."""
-    output_filepath = output_filepath.replace("\\", "/")
-    george_script_lines = [
-        # Variable containing full path to output file
-        "output_path = \"{}\"".format(output_filepath),
-        # Get Current Layer ID
-        "tv_LayerCurrentID",
-        "current_layer_id = result"
-    ]
-    # Script part for getting and storing layer information to temp
-    layer_data_getter = (
-        # Get information about layer's group
-        "tv_layercolor \"get\" layer_id",
-        "group_id = result",
-        "tv_LayerInfo layer_id",
-        (
-            "PARSE result visible position opacity name"
-            " type startFrame endFrame prelighttable postlighttable"
-            " selected editable sencilState"
-        ),
-        # Check if layer ID match `tv_LayerCurrentID`
-        "is_current=0",
-        "IF CMP(current_layer_id, layer_id)==1",
-        # - mark layer as selected if layer id match to current layer id
-        "is_current=1",
-        "selected=1",
-        "END",
-        # Prepare line with data separated by "|"
-        (
-            "line = layer_id'|'group_id'|'visible'|'position'|'opacity'|'"
-            "name'|'type'|'startFrame'|'endFrame'|'prelighttable'|'"
-            "postlighttable'|'selected'|'editable'|'sencilState'|'is_current"
-        ),
-        # Write data to output file
-        "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' line",
-    )
-
-    # Collect data for all layers if layers are not specified
-    if layer_ids is None:
-        george_script_lines.extend((
-            # Layer loop variables
-            "loop = 1",
-            "idx = 0",
-            # Layers loop
-            "WHILE loop",
-            "tv_LayerGetID idx",
-            "layer_id = result",
-            "idx = idx + 1",
-            # Stop loop if layer_id is "NONE"
-            "IF CMP(layer_id, \"NONE\")==1",
-            "loop = 0",
-            "ELSE",
-            *layer_data_getter,
-            "END",
-            "END"
-        ))
-    else:
-        for layer_id in layer_ids:
-            george_script_lines.append("layer_id = {}".format(layer_id))
-            george_script_lines.extend(layer_data_getter)
-
-    return "\n".join(george_script_lines)
-
-
 def layers_data(layer_ids=None, communicator=None):
     """Backwards compatible function of 'get_layers_data'."""
     return get_layers_data(layer_ids, communicator)
 
 
 def get_layers_data(layer_ids=None, communicator=None):
-    """Collect all layers information from currently opened workfile."""
-    output_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-    )
-    output_file.close()
-    if layer_ids is not None and isinstance(layer_ids, int):
+    """Collect layers information from currently opened workfile.
+
+    Args:
+        layer_ids (Optional[Union[int, Iterable[int]]]): Layers to get, all
+            layers are returned if not passed. Missing layers are skipped.
+        communicator (Optional[BaseCommunicator]): Communicator.
+
+    Returns:
+        list[dict[str, Any]]: Layers data.
+
+    """
+    if layer_ids is None:
+        layer_ids = get_layer_ids(communicator)
+    elif isinstance(layer_ids, int):
         layer_ids = [layer_ids]
+    layer_ids = list(layer_ids)
 
-    output_filepath = output_file.name
+    commands = ["tv_LayerCurrentID"]
+    for layer_id in layer_ids:
+        commands.append(f"tv_LayerColor get {layer_id}")
+        commands.append(f"tv_LayerInfo {layer_id}")
+    outputs = execute_george_batch(commands, communicator)
+    if not outputs:
+        return []
 
-    george_script = get_layers_data_george_script(output_filepath, layer_ids)
-
-    execute_george_through_file(george_script, communicator)
-
-    with open(output_filepath, "r") as stream:
-        data = stream.read()
-
-    output = parse_layers_data(data)
-    os.remove(output_filepath)
-    return output
+    current_layer_id = outputs[0]
+    layers = []
+    for idx, layer_id in enumerate(layer_ids):
+        group_id = outputs[1 + idx * 2]
+        layer_info = outputs[2 + idx * 2]
+        # Layer does not exist
+        if not layer_info:
+            continue
+        layers.append(
+            parse_layer_info(layer_id, group_id, layer_info, current_layer_id)
+        )
+    return layers
 
 
 def parse_group_data(data):
-    """Parse group data collected in 'get_groups_data'."""
+    """Parse group data in format of old george script.
+
+    Deprecated:
+        Data are not stored to a file anymore, use 'get_groups_data'.
+
+    """
     output = []
     groups_raw = data.split("\n")
     for group_raw in groups_raw:
@@ -189,42 +289,65 @@ def parse_group_data(data):
     return output
 
 
+def parse_group_color(group_color):
+    """Parse output of 'tv_LayerColor getcolor' to group data.
+
+    Returns:
+        Optional[dict[str, Any]]: Group data, None if output is invalid.
+
+    """
+    # Example: '0 1 250 0 0 "group name"'
+    parts = group_color.strip().split(" ", 5)
+    if len(parts) != 6:
+        return None
+    clip_id, group_id, red, green, blue, name = parts
+    return {
+        "group_id": int(group_id),
+        "name": _unquote(name),
+        "clip_id": int(clip_id),
+        "red": int(red),
+        "green": int(green),
+        "blue": int(blue),
+    }
+
+
 def groups_data(communicator=None):
     """Backwards compatible function of 'get_groups_data'."""
     return get_groups_data(communicator)
 
 
+def get_group_count(communicator=None):
+    """Number of color groups, without the default group 0.
+
+    TVPaint 11.7 has 26 groups, newer versions have more.
+
+    Returns:
+        int: Number of groups.
+
+    """
+    if not communicator:
+        communicator = CommunicationWrapper.communicator
+    return communicator.get_group_count() or 0
+
+
 def get_groups_data(communicator=None):
-    """Information about groups from current workfile."""
-    output_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
+    """Information about groups from current workfile.
+
+    Default group 0 is not included.
+    """
+    group_count = get_group_count(communicator)
+    outputs = execute_george_batch(
+        [
+            f"tv_LayerColor getcolor 0 {idx}"
+            for idx in range(1, group_count + 1)
+        ],
+        communicator
     )
-    output_file.close()
-
-    output_filepath = output_file.name.replace("\\", "/")
-    george_script_lines = (
-        # Variable containing full path to output file
-        "output_path = \"{}\"".format(output_filepath),
-        "empty = 0",
-        # Loop over 26 groups which is ATM maximum possible (in 11.7)
-        # - ref: https://www.tvpaint.com/forum/viewtopic.php?t=13880
-        "FOR idx = 1 TO 26",
-        # Receive information about groups
-        "tv_layercolor \"getcolor\" 0 idx",
-        "PARSE result clip_id group_index c_red c_green c_blue group_name",
-        # Create and add line to output file
-        "line = clip_id'|'group_index'|'c_red'|'c_green'|'c_blue'|'group_name",
-        "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' line",
-        "END",
-    )
-    george_script = "\n".join(george_script_lines)
-    execute_george_through_file(george_script, communicator)
-
-    with open(output_filepath, "r") as stream:
-        data = stream.read()
-
-    output = parse_group_data(data)
-    os.remove(output_filepath)
+    output = []
+    for group_color in outputs:
+        group = parse_group_color(group_color)
+        if group is not None:
+            output.append(group)
     return output
 
 
@@ -257,54 +380,65 @@ def get_layers_pre_post_behavior(layer_ids, communicator=None):
     # Auto convert to list
     if not isinstance(layer_ids, (list, set, tuple)):
         layer_ids = [layer_ids]
+    layer_ids = list(layer_ids)
 
-    # Prepare temp file
-    output_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-    )
-    output_file.close()
-
-    output_filepath = output_file.name.replace("\\", "/")
-    george_script_lines = [
-        # Variable containing full path to output file
-        "output_path = \"{}\"".format(output_filepath),
-    ]
+    commands = []
     for layer_id in layer_ids:
-        george_script_lines.extend([
-            "layer_id = {}".format(layer_id),
-            "tv_layerprebehavior layer_id",
-            "pre_beh = result",
-            "tv_layerpostbehavior layer_id",
-            "post_beh = result",
-            "line = layer_id'|'pre_beh'|'post_beh",
-            "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' line"
-        ])
+        commands.append(f"tv_LayerPreBehavior {layer_id}")
+        commands.append(f"tv_LayerPostBehavior {layer_id}")
+    outputs = execute_george_batch(commands, communicator)
 
-    george_script = "\n".join(george_script_lines)
-    execute_george_through_file(george_script, communicator)
-
-    # Read data
-    with open(output_filepath, "r") as stream:
-        data = stream.read()
-
-    # Remove temp file
-    os.remove(output_filepath)
-
-    # Parse data
     output = {}
-    raw_lines = data.split("\n")
-    for raw_line in raw_lines:
-        line = raw_line.strip()
-        if not line:
+    for idx, layer_id in enumerate(layer_ids):
+        pre_beh = outputs[idx * 2]
+        post_beh = outputs[idx * 2 + 1]
+        # Layer does not exist
+        if pre_beh.upper().startswith("ERROR"):
             continue
-        parts = line.split("|")
-        if len(parts) != 3:
-            continue
-        layer_id, pre_beh, post_beh = parts
         output[int(layer_id)] = {
             "pre": pre_beh.lower(),
             "post": post_beh.lower()
         }
+    return output
+
+
+def _get_exposure_frames(frame_ranges_by_layer_id, communicator=None):
+    """Find exposure frames of layers.
+
+    Exposure is read from current layer, so layers are made current one by
+    one. Current layer is restored at the end.
+
+    Args:
+        frame_ranges_by_layer_id (dict[int, tuple[int, int]]): First and
+            last frame by layer id.
+        communicator (Optional[BaseCommunicator]): Communicator.
+
+    Returns:
+        dict[int, list[int]]: Frames where exposure is set to "Head".
+
+    """
+    current_layer_id = execute_george("tv_LayerCurrentID", communicator)
+    commands = []
+    frames_by_layer_id = {}
+    for layer_id, (first_frame, last_frame) in (
+        frame_ranges_by_layer_id.items()
+    ):
+        commands.append(f"tv_LayerSet {layer_id}")
+        frames = list(range(first_frame, last_frame + 1))
+        frames_by_layer_id[layer_id] = (len(commands), frames)
+        commands.extend(f"tv_ExposureInfo {frame}" for frame in frames)
+
+    if current_layer_id:
+        commands.append(f"tv_LayerSet {current_layer_id}")
+    outputs = execute_george_batch(commands, communicator)
+
+    output = {}
+    for layer_id, (start_idx, frames) in frames_by_layer_id.items():
+        output[layer_id] = [
+            frame
+            for frame, exposure in zip(frames, outputs[start_idx:])
+            if exposure == "Head"
+        ]
     return output
 
 
@@ -327,69 +461,23 @@ def get_layers_exposure_frames(layer_ids, layers_data=None, communicator=None):
     """
 
     if layers_data is None:
-        layers_data = get_layers_data(layer_ids)
-    _layers_by_id = {
+        layers_data = get_layers_data(layer_ids, communicator)
+    layers_by_id = {
         layer["layer_id"]: layer
         for layer in layers_data
     }
-    layers_by_id = {
-        layer_id: _layers_by_id.get(layer_id)
-        for layer_id in layer_ids
-    }
-    tmp_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
+
+    output = {layer_id: [] for layer_id in layer_ids}
+    frame_ranges_by_layer_id = {}
+    for layer_id in layer_ids:
+        layer = layers_by_id.get(layer_id)
+        if layer:
+            frame_ranges_by_layer_id[layer_id] = (
+                layer["frame_start"], layer["frame_end"]
+            )
+    output.update(
+        _get_exposure_frames(frame_ranges_by_layer_id, communicator)
     )
-    tmp_file.close()
-    tmp_output_path = tmp_file.name.replace("\\", "/")
-    george_script_lines = [
-        "output_path = \"{}\"".format(tmp_output_path)
-    ]
-
-    output = {}
-    layer_id_mapping = {}
-    for layer_id, layer_data in layers_by_id.items():
-        layer_id_mapping[str(layer_id)] = layer_id
-        output[layer_id] = []
-        if not layer_data:
-            continue
-        first_frame = layer_data["frame_start"]
-        last_frame = layer_data["frame_end"]
-        george_script_lines.extend([
-            "line = \"\"",
-            "layer_id = {}".format(layer_id),
-            "line = line''layer_id",
-            "tv_layerset layer_id",
-            "frame = {}".format(first_frame),
-            "WHILE (frame <= {})".format(last_frame),
-            "tv_exposureinfo frame",
-            "exposure = result",
-            "IF (CMP(exposure, \"Head\") == 1)",
-            "line = line'|'frame",
-            "END",
-            "frame = frame + 1",
-            "END",
-            "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' line"
-        ])
-
-    execute_george_through_file("\n".join(george_script_lines), communicator)
-
-    with open(tmp_output_path, "r") as stream:
-        data = stream.read()
-
-    os.remove(tmp_output_path)
-
-    lines = []
-    for line in data.split("\n"):
-        line = line.strip()
-        if line:
-            lines.append(line)
-
-    for line in lines:
-        line_items = list(line.split("|"))
-        layer_id = line_items.pop(0)
-        _layer_id = layer_id_mapping[layer_id]
-        output[_layer_id] = [int(frame) for frame in line_items]
-
     return output
 
 
@@ -413,55 +501,16 @@ def get_exposure_frames(
         list: Frames where exposure is set to "Head".
     """
     if first_frame is None or last_frame is None:
-        layer = layers_data(layer_id)[0]
+        layer = layers_data(layer_id, communicator)[0]
         if first_frame is None:
             first_frame = layer["frame_start"]
         if last_frame is None:
             last_frame = layer["frame_end"]
 
-    tmp_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
+    output = _get_exposure_frames(
+        {layer_id: (first_frame, last_frame)}, communicator
     )
-    tmp_file.close()
-    tmp_output_path = tmp_file.name.replace("\\", "/")
-    george_script_lines = [
-        "tv_layerset {}".format(layer_id),
-        "output_path = \"{}\"".format(tmp_output_path),
-        "output = \"\"",
-        "frame = {}".format(first_frame),
-        "WHILE (frame <= {})".format(last_frame),
-        "tv_exposureinfo frame",
-        "exposure = result",
-        "IF (CMP(exposure, \"Head\") == 1)",
-        "IF (CMP(output, \"\") == 1)",
-        "output = output''frame",
-        "ELSE",
-        "output = output'|'frame",
-        "END",
-        "END",
-        "frame = frame + 1",
-        "END",
-        "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' output"
-    ]
-
-    execute_george_through_file("\n".join(george_script_lines), communicator)
-
-    with open(tmp_output_path, "r") as stream:
-        data = stream.read()
-
-    os.remove(tmp_output_path)
-
-    lines = []
-    for line in data.split("\n"):
-        line = line.strip()
-        if line:
-            lines.append(line)
-
-    exposure_frames = []
-    for line in lines:
-        for frame in line.split("|"):
-            exposure_frames.append(int(frame))
-    return exposure_frames
+    return output[layer_id]
 
 
 def get_scene_data(communicator=None):
@@ -473,7 +522,22 @@ def get_scene_data(communicator=None):
     Returns:
         dict: Scene data collected in many ways.
     """
-    workfile_info = execute_george("tv_projectinfo", communicator)
+    (
+        workfile_info,
+        mark_in_result,
+        mark_out_result,
+        start_frame,
+        bg_color,
+    ) = execute_george_batch(
+        [
+            "tv_ProjectInfo",
+            "tv_MarkIn",
+            "tv_MarkOut",
+            "tv_StartFrame",
+            "tv_Background",
+        ],
+        communicator
+    )
     workfile_info_parts = workfile_info.split(" ")
 
     # Project frame start - not used
@@ -485,13 +549,9 @@ def get_scene_data(communicator=None):
     width = int(workfile_info_parts.pop(-1))
 
     # Marks return as "{frame - 1} {state} ", example "0 set".
-    result = execute_george("tv_markin", communicator)
-    mark_in_frame, mark_in_state, _ = result.split(" ")
+    mark_in_frame, mark_in_state, _ = mark_in_result.split(" ")
+    mark_out_frame, mark_out_state, _ = mark_out_result.split(" ")
 
-    result = execute_george("tv_markout", communicator)
-    mark_out_frame, mark_out_state, _ = result.split(" ")
-
-    start_frame = execute_george("tv_startframe", communicator)
     return {
         "width": width,
         "height": height,
@@ -505,8 +565,22 @@ def get_scene_data(communicator=None):
         "mark_out_state": mark_out_state,
         "mark_out_set": mark_out_state == "set",
         "start_frame": int(start_frame),
-        "bg_color": get_scene_bg_color(communicator)
+        "bg_color": parse_bg_color(bg_color),
     }
+
+
+def parse_bg_color(bg_color):
+    """Parse output of 'tv_Background'.
+
+    Returns:
+        Optional[list[str]]: Background type followed by color values,
+            e.g. '["color", "255", "255", "255"]'.
+
+    """
+    bg_color = (bg_color or "").strip()
+    if not bg_color:
+        return None
+    return bg_color.split(" ")
 
 
 def get_scene_bg_color(communicator=None):
@@ -515,28 +589,71 @@ def get_scene_bg_color(communicator=None):
     Is important for review exporting where scene bg color is used as
     background.
     """
-    output_file = tempfile.NamedTemporaryFile(
-        mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-    )
-    output_file.close()
-    output_filepath = output_file.name.replace("\\", "/")
-    george_script_lines = [
-        # Variable containing full path to output file
-        "output_path = \"{}\"".format(output_filepath),
-        "tv_background",
-        "bg_color = result",
-        # Write data to output file
-        "tv_writetextfile \"strict\" \"append\" '\"'output_path'\"' bg_color"
+    return parse_bg_color(execute_george("tv_Background", communicator))
+
+
+def import_sequence(
+    filepath,
+    layer_name,
+    stretch=False,
+    timestretch=False,
+    preload=False,
+    communicator=None,
+):
+    """Load image or image sequence as new layer.
+
+    Args:
+        filepath (str): Path to image or first image of sequence.
+        layer_name (str): Name of created layer.
+        stretch (bool): Stretch image to project resolution.
+        timestretch (bool): Stretch sequence to project frame rate.
+        preload (bool): Preload images.
+        communicator (Optional[BaseCommunicator]): Communicator.
+
+    Returns:
+        int: Id of created layer.
+
+    Raises:
+        FileNotFoundError: File does not exist.
+        RuntimeError: TVPaint failed to load the file.
+
+    """
+    # TVPaint shows modal dialog for missing file which blocks it
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"File to load does not exist: {filepath}")
+
+    command_parts = [
+        "tv_LoadSequence", george_string(george_path(filepath))
     ]
+    for enabled, option in (
+        (stretch, "stretch"),
+        (timestretch, "timestretch"),
+        (preload, "preload"),
+    ):
+        if enabled:
+            command_parts.append(option)
 
-    george_script = "\n".join(george_script_lines)
-    execute_george_through_file(george_script, communicator)
+    # Loaded layer becomes current layer, 'tv_LoadSequence' should return
+    #   id of the layer but returns '1' in TVPaint 11.7
+    outputs = execute_george_batch(
+        [
+            "tv_LayerCurrentID",
+            " ".join(command_parts),
+            "tv_LayerCurrentID",
+        ],
+        communicator
+    )
+    if len(outputs) != 3:
+        raise RuntimeError(f"TVPaint failed to load '{filepath}'.")
+    previous_layer_id, result, layer_id = outputs
+    if result.strip().startswith("-1") or layer_id == previous_layer_id:
+        raise RuntimeError(
+            f"TVPaint failed to load '{filepath}'. Output: {result}"
+        )
+    layer_id = int(layer_id)
 
-    with open(output_filepath, "r") as stream:
-        data = stream.read()
-
-    os.remove(output_filepath)
-    data = data.strip()
-    if not data:
-        return None
-    return data.split(" ")
+    execute_george(
+        f"tv_LayerRename {layer_id} {george_string(layer_name)}",
+        communicator
+    )
+    return layer_id

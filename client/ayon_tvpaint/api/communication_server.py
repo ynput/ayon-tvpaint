@@ -1,31 +1,33 @@
 import os
 import json
 import time
+import uuid
+import inspect
+import itertools
 import subprocess
 import collections
 import asyncio
+import ctypes
 import logging
-import socket
 import platform
 import filecmp
 import tempfile
 import threading
 import shutil
+import concurrent.futures
 
-from contextlib import closing
-
-from aiohttp import web
-from aiohttp_json_rpc import JsonRpc
-from aiohttp_json_rpc.protocol import (
-    encode_request, encode_error, decode_msg, JsonRpcMsgTyp
-)
-from aiohttp_json_rpc.exceptions import RpcError
+import aiohttp
 
 from ayon_core.lib import emit_event
 from ayon_tvpaint.tvpaint_plugin import get_plugin_files_path
+from ayon_tvpaint.version import __version__ as ADDON_VERSION
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
+
+# Environment variable read by TVPaint plugin, stored to its server file
+#   to be able to find server of launched process.
+LAUNCH_ID_ENV_KEY = "AYON_TVPAINT_LAUNCH_ID"
 
 
 class CommunicationWrapper:
@@ -62,307 +64,628 @@ class CommunicationWrapper:
         return cls.communicator.execute_george(george_script)
 
 
-class WebSocketServer:
-    def __init__(self):
-        self.client = None
+def get_servers_dir():
+    """Directory where TVPaint plugin stores information about its server.
 
-        self.loop = asyncio.new_event_loop()
-        self.app = web.Application(loop=self.loop)
-        self.port = self.find_free_port()
-        self.websocket_thread = WebsocketServerThread(
-            self, self.port, loop=self.loop
+    Each running TVPaint with AYON plugin has a 'tvpaint_<pid>.json' file
+    in the directory. The file is removed when TVPaint is closed.
+
+    The location is predefined and must match 'servers_dir' in the plugin
+    ('tvpaint_plugin/src/lib.rs'). It is the default AYON launcher local
+    directory, but it does not use 'AYON_LAUNCHER_LOCAL_DIR' because
+    TVPaint launched outside of AYON does not have it set.
+
+    Returns:
+        str: Path to directory.
+
+    """
+    platform_name = platform.system().lower()
+    if platform_name == "windows":
+        local_dir = os.path.join(
+            os.environ.get("LOCALAPPDATA")
+            or os.path.join(os.path.expanduser("~"), "AppData", "Local"),
+            "Ynput",
+            "AYON",
         )
+    elif platform_name == "darwin":
+        local_dir = os.path.join(
+            os.path.expanduser("~"), "Library", "Application Support", "AYON"
+        )
+    else:
+        local_dir = os.path.join(
+            os.environ.get("XDG_DATA_HOME")
+            or os.path.join(os.path.expanduser("~"), ".local", "share"),
+            "AYON",
+        )
+    return os.path.join(local_dir, "tvpaint_servers")
+
+
+def _is_process_running(pid):
+    if platform.system().lower() != "windows":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    error_access_denied = 5
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(
+        process_query_limited_information, False, pid
+    )
+    if not handle:
+        return ctypes.get_last_error() == error_access_denied
+    try:
+        exit_code = ctypes.c_ulong()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class TVPaintServerInfo:
+    """Information about websocket server running in TVPaint plugin.
+
+    Args:
+        filepath (str): Path to server file.
+        data (dict[str, Any]): Content of the server file.
+
+    """
+    def __init__(self, filepath, data):
+        self.filepath = filepath
+        self.data = data
 
     @property
-    def server_is_running(self):
-        return self.websocket_thread.server_is_running
+    def pid(self):
+        return self.data["pid"]
 
-    def add_route(self, *args, **kwargs):
-        self.app.router.add_route(*args, **kwargs)
+    @property
+    def port(self):
+        return self.data["port"]
 
-    @staticmethod
-    def find_free_port():
-        with closing(
-            socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ) as sock:
-            sock.bind(("", 0))
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            port = sock.getsockname()[1]
-        return port
+    @property
+    def url(self):
+        return self.data["url"]
 
-    def start(self):
-        self.websocket_thread.start()
+    @property
+    def launch_id(self):
+        return self.data.get("launch_id")
 
-    def stop(self):
+    @property
+    def plugin_version(self):
+        return self.data.get("plugin_version")
+
+    @property
+    def executable(self):
+        return self.data.get("executable")
+
+    def is_executable(self, executable):
+        """Server runs in TVPaint launched with the executable."""
+        if not self.executable:
+            return True
+        return _normalize_path(self.executable) == _normalize_path(executable)
+
+    def __repr__(self):
+        return f"<TVPaintServerInfo pid={self.pid} url={self.url}>"
+
+
+def _normalize_path(path):
+    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+
+
+class _RunningProcess:
+    """Process which was not started by this process.
+
+    Mimics 'poll' of 'subprocess.Popen' used to check if TVPaint is running.
+    """
+    def __init__(self, pid):
+        self.pid = pid
+        self.returncode = None
+
+    def poll(self):
+        if self.returncode is None and not _is_process_running(self.pid):
+            self.returncode = 0
+        return self.returncode
+
+
+def get_running_servers():
+    """Get servers of running TVPaint processes.
+
+    Server files of processes that are not running anymore (e.g. TVPaint
+    crashed) are removed.
+
+    Returns:
+        list[TVPaintServerInfo]: Servers of running TVPaint processes.
+
+    """
+    servers_dir = get_servers_dir()
+    if not os.path.isdir(servers_dir):
+        return []
+
+    output = []
+    for filename in os.listdir(servers_dir):
+        if not filename.endswith(".json"):
+            continue
+        filepath = os.path.join(servers_dir, filename)
         try:
-            if self.websocket_thread.is_running:
-                log.debug("Stopping websocket server")
-                self.websocket_thread.is_running = False
-                self.websocket_thread.stop()
+            with open(filepath, "r") as stream:
+                server_info = TVPaintServerInfo(filepath, json.load(stream))
+            pid = int(server_info.pid)
+            server_info.url
+        except (OSError, ValueError, KeyError, TypeError):
+            log.debug(f"Skipping invalid server file '{filepath}'.")
+            continue
+
+        if _is_process_running(pid):
+            output.append(server_info)
+            continue
+
+        log.debug(f"Removing server file of dead process '{filepath}'.")
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+    return output
+
+
+def find_server(launch_id=None, pid=None):
+    """Find server of running TVPaint process.
+
+    Args:
+        launch_id (Optional[str]): Launch id passed to TVPaint process
+            with 'AYON_TVPAINT_LAUNCH_ID' environment variable.
+        pid (Optional[int]): TVPaint process id.
+
+    Returns:
+        Optional[TVPaintServerInfo]: Server info or None if not found.
+
+    """
+    for server_info in get_running_servers():
+        if launch_id is not None and server_info.launch_id != launch_id:
+            continue
+        if pid is not None and server_info.pid != pid:
+            continue
+        return server_info
+    return None
+
+
+class TVPaintRpcError(Exception):
+    """Error response received from TVPaint plugin."""
+    def __init__(self, error):
+        self.code = error.get("code")
+        self.message = error.get("message")
+        super().__init__(f"TVPaint error {self.code}: {self.message}")
+
+
+class TVPaintRpcClient:
+    """JSON-RPC 2.0 client connected to websocket server in TVPaint.
+
+    The client runs its own asyncio loop in a thread. Public methods are
+    blocking and can be called from any thread except the loop thread.
+
+    Methods called by TVPaint (e.g. on menu button click) are registered
+    with 'add_method'. Callbacks are executed in the loop thread so they
+    must not block, nor call blocking methods of the client.
+    """
+    def __init__(self):
+        self.loop = asyncio.new_event_loop()
+        self._session = None
+        self._ws = None
+        self._request_ids = itertools.count(1)
+        self._pending_requests = {}
+        self._methods = {}
+        # Running method calls, cancelled on close
+        self._method_tasks = set()
+        self._thread = threading.Thread(
+            target=self._run_loop, name="TVPaintRpcClient", daemon=True
+        )
+        self._thread.start()
+
+    @property
+    def is_connected(self):
+        return self._ws is not None and not self._ws.closed
+
+    def add_method(self, name, callback):
+        """Register method which can be called by TVPaint."""
+        self._methods[name] = callback
+
+    def connect(self, url, timeout=10):
+        self._run(self._connect(url), timeout)
+
+    def close(self):
+        if not self._thread.is_alive():
+            return
+        try:
+            self._run(self._close(), 5)
         except Exception:
+            log.debug("Failed to close connection to TVPaint", exc_info=True)
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self._thread.join(5)
+
+    def send_request(self, method, params=None, timeout=None):
+        """Call method in TVPaint and wait for result.
+
+        Raises:
+            TVPaintRpcError: TVPaint responded with error.
+            ConnectionError: Not connected or connection was closed.
+            TimeoutError: Response did not arrive in time.
+
+        """
+        response = self._run(self._send_request(method, params), timeout)
+        error = response.get("error")
+        if error:
+            raise TVPaintRpcError(error)
+        return response.get("result")
+
+    def send_notification(self, method, params=None):
+        """Call method in TVPaint without waiting for result."""
+        self._run(self._send({
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params or [],
+        }))
+
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def _run(self, coroutine, timeout=None):
+        if threading.current_thread() is self._thread:
+            coroutine.close()
+            raise RuntimeError(
+                "Can't wait for TVPaint response in the client loop thread."
+            )
+        future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+        try:
+            return future.result(timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise TimeoutError("TVPaint did not respond in time.")
+
+    async def _connect(self, url):
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+        self._ws = await self._session.ws_connect(url, max_msg_size=0)
+        self.loop.create_task(self._read_loop(self._ws))
+
+    async def _close(self):
+        for task in tuple(self._method_tasks):
+            task.cancel()
+        if self._method_tasks:
+            await asyncio.gather(*self._method_tasks, return_exceptions=True)
+        if self._ws is not None:
+            await self._ws.close()
+        if self._session is not None:
+            await self._session.close()
+
+    async def _read_loop(self, ws):
+        try:
+            async for message in ws:
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    await self._process_message(message.data)
+        finally:
+            for future in self._pending_requests.values():
+                if not future.done():
+                    future.set_exception(
+                        ConnectionError("Connection to TVPaint was closed.")
+                    )
+            self._pending_requests.clear()
+            log.info("Connection to TVPaint closed")
+
+    async def _send(self, data):
+        if not self.is_connected:
+            raise ConnectionError("Not connected to TVPaint.")
+        await self._ws.send_str(json.dumps(data))
+
+    async def _send_request(self, method, params):
+        request_id = next(self._request_ids)
+        future = self.loop.create_future()
+        self._pending_requests[request_id] = future
+        try:
+            await self._send({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params or [],
+            })
+            return await future
+        finally:
+            self._pending_requests.pop(request_id, None)
+
+    async def _process_message(self, raw_message):
+        try:
+            message = json.loads(raw_message)
+        except ValueError:
+            log.warning(f"Received invalid message: {raw_message}")
+            return
+
+        if not isinstance(message, dict):
+            return
+
+        message_id = message.get("id")
+        method = message.get("method")
+        if method is None:
+            future = self._pending_requests.get(message_id)
+            if future is not None and not future.done():
+                future.set_result(message)
+            return
+
+        # Handle in a task, so the read loop can receive responses while
+        #   the callback waits e.g. for george scripts executed by it.
+        task = self.loop.create_task(
+            self._handle_method_call(message_id, method, message.get("params"))
+        )
+        self._method_tasks.add(task)
+        task.add_done_callback(self._method_tasks.discard)
+
+    async def _handle_method_call(self, message_id, method, params):
+        response = await self._call_method(method, params)
+        if message_id is None:
+            return
+        response["jsonrpc"] = "2.0"
+        response["id"] = message_id
+        try:
+            await self._send(response)
+        except ConnectionError:
+            log.warning(f"Could not send response of '{method}' to TVPaint")
+
+    async def _call_method(self, method, params):
+        callback = self._methods.get(method)
+        if callback is None:
+            log.warning(f"TVPaint called unknown method '{method}'")
+            return {"error": {
+                "code": -32601,
+                "message": f"Method \"{method}\" not found",
+            }}
+
+        try:
+            if isinstance(params, dict):
+                result = callback(**params)
+            else:
+                result = callback(*(params or []))
+            if inspect.isawaitable(result):
+                result = await result
+            return {"result": result}
+
+        except Exception as exc:
             log.warning(
-                "Error has happened during Killing websocket server",
+                f"Method '{method}' called by TVPaint failed", exc_info=True
+            )
+            return {"error": {"code": -32000, "message": str(exc)}}
+
+
+def get_host_client_info():
+    """Data of this process registered in TVPaint as its host client.
+
+    Other AYON processes use them to decide if TVPaint can be reused. Same
+    bundle and variant means same addons, so the host client can open
+    workfile of any project.
+
+    Returns:
+        dict[str, Any]: Host client data.
+
+    """
+    from ayon_core.lib import get_settings_variant
+
+    return {
+        "bundle_name": os.getenv("AYON_BUNDLE_NAME"),
+        "studio_bundle_name": os.getenv("AYON_STUDIO_BUNDLE_NAME"),
+        "variant": get_settings_variant(),
+        "addon_version": ADDON_VERSION,
+        "pid": os.getpid(),
+    }
+
+
+def get_workfile_from_launch_args(launch_args):
+    """Workfile path passed to TVPaint executable.
+
+    Args:
+        launch_args (list[str]): TVPaint executable followed by arguments.
+
+    Returns:
+        Optional[str]: Path to workfile.
+
+    """
+    for arg in launch_args[1:]:
+        if arg.lower().endswith(".tvpp"):
+            return arg
+    return None
+
+
+class RunningTVPaint:
+    """TVPaint which is already running.
+
+    TVPaint is single instance application, launching its executable again
+    only passes arguments to the running TVPaint. AYON has to use it.
+
+    Args:
+        server_info (TVPaintServerInfo): Server of the TVPaint plugin.
+        host_client (Optional[dict[str, Any]]): Data of AYON process
+            controlling the TVPaint, None if there is not any.
+
+    """
+    def __init__(self, server_info, host_client):
+        self.server_info = server_info
+        self.host_client = host_client
+
+    @property
+    def has_host_client(self):
+        return self.host_client is not None
+
+    def is_compatible(self):
+        """Host client uses the same bundle and variant as this process."""
+        if self.host_client is None:
+            return True
+        current = get_host_client_info()
+        return all(
+            self.host_client.get(key) == current[key]
+            for key in ("bundle_name", "studio_bundle_name", "variant")
+        )
+
+    def open_workfile(
+        self, workfile_path, project_name, folder_path, task_name
+    ):
+        """Let host client open workfile in context.
+
+        Raises:
+            TVPaintRpcError: Host client failed to open the workfile.
+            ConnectionError: Connection to TVPaint failed.
+
+        """
+        client = TVPaintRpcClient()
+        try:
+            client.connect(self.server_info.url)
+            # No timeout, user might be asked to save current changes
+            client.send_request("send_to_host", {
+                "method": "open_workfile",
+                "params": {
+                    "workfile_path": workfile_path,
+                    "project_name": project_name,
+                    "folder_path": folder_path,
+                    "task_name": task_name,
+                },
+            })
+        finally:
+            client.close()
+
+
+def find_running_tvpaint(executable):
+    """Find running TVPaint launched with the executable.
+
+    Args:
+        executable (str): Path to TVPaint executable.
+
+    Returns:
+        Optional[RunningTVPaint]: Running TVPaint or None.
+
+    """
+    for server_info in get_running_servers():
+        if not server_info.is_executable(executable):
+            continue
+
+        client = TVPaintRpcClient()
+        try:
+            client.connect(server_info.url)
+            info = client.send_request("get_server_info", timeout=5)
+        except (
+            TVPaintRpcError,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+            aiohttp.ClientError,
+        ):
+            log.warning(
+                "Failed to connect to running TVPaint"
+                f" (pid {server_info.pid})",
                 exc_info=True
             )
-
-
-class WebsocketServerThread(threading.Thread):
-    """ Listener for websocket rpc requests.
-
-        It would be probably better to "attach" this to main thread (as for
-        example Harmony needs to run something on main thread), but currently
-        it creates separate thread and separate asyncio event loop
-    """
-    def __init__(self, module, port, loop):
-        super(WebsocketServerThread, self).__init__()
-        self.is_running = False
-        self.server_is_running = False
-        self.port = port
-        self.module = module
-        self.loop = loop
-        self.runner = None
-        self.site = None
-        self.tasks = []
-
-    def run(self):
-        self.is_running = True
-
-        try:
-            log.debug("Starting websocket server")
-
-            self.loop.run_until_complete(self.start_server())
-
-            log.info(
-                "Running Websocket server on URL:"
-                " \"ws://localhost:{}\"".format(self.port)
-            )
-
-            asyncio.ensure_future(self.check_shutdown(), loop=self.loop)
-
-            self.server_is_running = True
-            self.loop.run_forever()
-
-        except Exception:
-            log.warning(
-                "Websocket Server service has failed", exc_info=True
-            )
+            continue
         finally:
-            self.server_is_running = False
-            # optional
-            self.loop.close()
-
-        self.is_running = False
-        log.info("Websocket server stopped")
-
-    async def start_server(self):
-        """ Starts runner and TCPsite """
-        self.runner = web.AppRunner(self.module.app)
-        await self.runner.setup()
-        self.site = web.TCPSite(self.runner, "localhost", self.port)
-        await self.site.start()
-
-    def stop(self):
-        """Sets is_running flag to false, 'check_shutdown' shuts server down"""
-        self.is_running = False
-
-    async def check_shutdown(self):
-        """ Future that is running and checks if server should be running
-            periodically.
-        """
-        while self.is_running:
-            while self.tasks:
-                task = self.tasks.pop(0)
-                log.debug("waiting for task {}".format(task))
-                await task
-                log.debug("returned value {}".format(task.result))
-
-            await asyncio.sleep(0.5)
-
-        log.debug("## Server shutdown started")
-
-        await self.site.stop()
-        log.debug("# Site stopped")
-        await self.runner.cleanup()
-        log.debug("# Server runner stopped")
-        tasks = [
-            task for task in asyncio.all_tasks()
-            if task is not asyncio.current_task()
-        ]
-        list(map(lambda task: task.cancel(), tasks))  # cancel all the tasks
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        log.debug(f"Finished awaiting cancelled tasks, results: {results}...")
-        await self.loop.shutdown_asyncgens()
-        # to really make sure everything else has time to stop
-        await asyncio.sleep(0.07)
-        self.loop.stop()
+            client.close()
+        return RunningTVPaint(server_info, info.get("host_client"))
+    return None
 
 
-class BaseTVPaintRpc(JsonRpc):
-    def __init__(self, communication_obj, route_name="", **kwargs):
-        super().__init__(**kwargs)
-        self.requests_ids = collections.defaultdict(lambda: 0)
-        self.waiting_requests = collections.defaultdict(list)
-        self.responses = collections.defaultdict(list)
-
-        self.route_name = route_name
-        self.communication_obj = communication_obj
-
-    async def _handle_rpc_msg(self, http_request, raw_msg):
-        # This is duplicated code from super but there is no way how to do it
-        # to be able handle server->client requests
-        host = http_request.host
-        if host in self.waiting_requests:
-            try:
-                _raw_message = raw_msg.data
-                msg = decode_msg(_raw_message)
-
-            except RpcError as error:
-                await self._ws_send_str(http_request, encode_error(error))
-                return
-
-            if msg.type in (JsonRpcMsgTyp.RESULT, JsonRpcMsgTyp.ERROR):
-                msg_data = json.loads(_raw_message)
-                if msg_data.get("id") in self.waiting_requests[host]:
-                    self.responses[host].append(msg_data)
-                    return
-
-        return await super()._handle_rpc_msg(http_request, raw_msg)
-
-    def client_connected(self):
-        # TODO This is poor check. Add check it is client from TVPaint
-        if self.clients:
-            return True
-        return False
-
-    def send_notification(self, client, method, params=None):
-        if params is None:
-            params = []
-        asyncio.run_coroutine_threadsafe(
-            client.ws.send_str(encode_request(method, params=params)),
-            loop=self.loop
-        )
-
-    def send_request(self, client, method, params=None, timeout=0):
-        if params is None:
-            params = []
-
-        client_host = client.host
-
-        request_id = self.requests_ids[client_host]
-        self.requests_ids[client_host] += 1
-
-        self.waiting_requests[client_host].append(request_id)
-
-        log.debug("Sending request to client {} ({}, {}) id: {}".format(
-            client_host, method, params, request_id
-        ))
-        future = asyncio.run_coroutine_threadsafe(
-            client.ws.send_str(encode_request(method, request_id, params)),
-            loop=self.loop
-        )
-        result = future.result()
-
-        not_found = object()
-        response = not_found
-        start = time.time()
-        while True:
-            if client.ws.closed:
-                return None
-
-            for _response in self.responses[client_host]:
-                _id = _response.get("id")
-                if _id == request_id:
-                    response = _response
-                    break
-
-            if response is not not_found:
-                break
-
-            if timeout > 0 and (time.time() - start) > timeout:
-                raise Exception("Timeout passed")
-                return
-
-            time.sleep(0.1)
-
-        if response is not_found:
-            raise Exception("Connection closed")
-
-        self.responses[client_host].remove(response)
-
-        error = response.get("error")
-        result = response.get("result")
-        if error:
-            raise Exception("Error happened: {}".format(error))
-        return result
-
-
-class QtTVPaintRpc(BaseTVPaintRpc):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
+class QtTVPaintRpc:
+    """Methods called by TVPaint plugin from its menu or by other AYON
+    processes through TVPaint plugin.
+    """
+    def __init__(self, communication_obj):
         from ayon_core.tools.utils import host_tools
         self.tools_helper = host_tools.HostToolsHelper()
 
-        route_name = self.route_name
+        self.communication_obj = communication_obj
 
-        # Register methods
-        self.add_methods(
-            (route_name, self.workfiles_tool),
-            (route_name, self.loader_tool),
-            (route_name, self.publish_tool),
-            (route_name, self.scene_inventory_tool),
-            (route_name, self.library_loader_tool),
-            (route_name, self.experimental_tools)
+    def register(self, rpc_client):
+        for name, callback in (
+            ("workfiles_tool", self.workfiles_tool),
+            ("loader_tool", self.loader_tool),
+            ("publish_tool", self.publish_tool),
+            ("scene_inventory_tool", self.scene_inventory_tool),
+            ("library_loader_tool", self.library_loader_tool),
+            ("experimental_tools", self.experimental_tools),
+            ("open_workfile", self.open_workfile),
+        ):
+            rpc_client.add_method(name, callback)
+
+    async def open_workfile(
+        self, workfile_path, project_name, folder_path, task_name
+    ):
+        """Open workfile with context, called by other AYON process.
+
+        The context is stored to the workfile metadata, the project can
+        differ from the current one.
+        """
+        log.info(f"Opening workfile '{workfile_path}' requested by launch")
+        item = MainThreadItem(
+            self._open_workfile,
+            workfile_path,
+            project_name,
+            folder_path,
+            task_name,
+        )
+        self._execute_in_main_thread(item, wait=False)
+        await item.async_wait()
+
+    def _open_workfile(
+        self, workfile_path, project_name, folder_path, task_name
+    ):
+        import ayon_api
+        from ayon_core.pipeline import registered_host
+
+        if not os.path.exists(workfile_path):
+            raise ValueError(f"Workfile '{workfile_path}' does not exist.")
+
+        folder_entity = ayon_api.get_folder_by_path(project_name, folder_path)
+        if not folder_entity:
+            raise ValueError(f"Folder '{folder_path}' was not found.")
+        task_entity = ayon_api.get_task_by_name(
+            project_name, folder_entity["id"], task_name
+        )
+        if not task_entity:
+            raise ValueError(
+                f"Task '{task_name}' was not found in '{folder_path}'."
+            )
+
+        registered_host().open_workfile_in_context(
+            workfile_path, project_name, folder_entity, task_entity
         )
 
     # Panel routes for tools
-    async def workfiles_tool(self):
+    def workfiles_tool(self):
         log.info("Triggering Workfile tool")
         item = MainThreadItem(self.tools_helper.show_workfiles)
         self._execute_in_main_thread(item, wait=False)
-        return
 
-    async def loader_tool(self):
+    def loader_tool(self):
         log.info("Triggering Loader tool")
         item = MainThreadItem(self.tools_helper.show_loader)
         self._execute_in_main_thread(item, wait=False)
-        return
 
-    async def publish_tool(self):
+    def publish_tool(self):
         log.info("Triggering Publish tool")
         item = MainThreadItem(self.tools_helper.show_publisher_tool)
         self._execute_in_main_thread(item, wait=False)
-        return
 
-    async def scene_inventory_tool(self):
-        """Open Scene Inventory tool.
-
-        Function can't confirm if tool was opened becauise one part of
-        SceneInventory initialization is calling websocket request to host but
-        host can't response because is waiting for response from this call.
-        """
+    def scene_inventory_tool(self):
         log.info("Triggering Scene inventory tool")
         item = MainThreadItem(self.tools_helper.show_scene_inventory)
-        # Do not wait for result of callback
         self._execute_in_main_thread(item, wait=False)
-        return
 
-    async def library_loader_tool(self):
+    def library_loader_tool(self):
         log.info("Triggering Library loader tool")
         item = MainThreadItem(self.tools_helper.show_library_loader)
         self._execute_in_main_thread(item, wait=False)
-        return
 
-    async def experimental_tools(self):
-        log.info("Triggering Library loader tool")
+    def experimental_tools(self):
+        log.info("Triggering Experimental tools")
         item = MainThreadItem(self.tools_helper.show_experimental_tools_dialog)
         self._execute_in_main_thread(item, wait=False)
-        return
-
-    async def _async_execute_in_main_thread(self, item, **kwargs):
-        await self.communication_obj.async_execute_in_main_thread(
-            item, **kwargs
-        )
 
     def _execute_in_main_thread(self, item, **kwargs):
         return self.communication_obj.execute_in_main_thread(item, **kwargs)
@@ -454,16 +777,20 @@ class MainThreadItem:
 class BaseCommunicator:
     def __init__(self):
         self.process = None
-        self.websocket_server = None
-        self.websocket_rpc = None
+        self.rpc_client = None
+        self.server_info = None
         self.exit_code = None
-        self._connected_client = None
+
+    @property
+    def is_connected(self):
+        if self.rpc_client is None:
+            return False
+        return self.rpc_client.is_connected
 
     @property
     def server_is_running(self):
-        if self.websocket_server is None:
-            return False
-        return self.websocket_server.server_is_running
+        """Kept for backwards compatibility, use 'is_connected'."""
+        return self.is_connected
 
     def _windows_file_process(self, src_dst_mapping, to_remove):
         """Windows specific file processing asking for admin permissions.
@@ -649,12 +976,15 @@ class BaseCommunicator:
             )
         raise RuntimeError(" & ".join(msg_parts))
 
-    def _launch_tv_paint(self, launch_args):
+    def _launch_tv_paint(self, launch_args, env=None):
         flags = (
             subprocess.DETACHED_PROCESS
             | subprocess.CREATE_NEW_PROCESS_GROUP
         )
-        env = os.environ.copy()
+        _env = os.environ.copy()
+        if env:
+            _env.update(env)
+        env = _env
         # Remove QuickTime from PATH on windows
         # - quicktime overrides TVPaint's ffmpeg encode/decode which may
         #   cause issues on loading
@@ -671,25 +1001,15 @@ class BaseCommunicator:
         }
         self.process = subprocess.Popen(launch_args, **kwargs)
 
-    def _create_routes(self):
-        self.websocket_rpc = BaseTVPaintRpc(
-            self, loop=self.websocket_server.loop
-        )
-        self.websocket_server.add_route(
-            "*", "/", self.websocket_rpc.handle_request
-        )
+    def _create_client(self):
+        self.rpc_client = TVPaintRpcClient()
 
-    def _start_webserver(self):
-        self.websocket_server.start()
-        # Make sure RPC is using same loop as websocket server
-        while not self.websocket_server.server_is_running:
-            time.sleep(0.1)
-
-    def _stop_webserver(self):
-        self.websocket_server.stop()
+    def _stop_client(self):
+        if self.rpc_client is not None:
+            self.rpc_client.close()
 
     def _exit(self, exit_code=None):
-        self._stop_webserver()
+        self._stop_client()
         if exit_code is not None:
             self.exit_code = exit_code
 
@@ -701,116 +1021,173 @@ class BaseCommunicator:
         log.info("Stopping communication")
         self._exit()
 
-    def launch(self, launch_args):
-        """Prepare all required data and launch host.
+    def _wait_for_server(self, launch_id):
+        """Wait until TVPaint plugin starts its server.
 
-        First is prepared websocket server as communication point for host,
-        when server is ready to use host is launched as subprocess.
+        Returns:
+            Optional[TVPaintServerInfo]: Server info or None if TVPaint
+                process ended.
+
+        """
+        while True:
+            if self.process.poll() is not None:
+                return None
+
+            server_info = find_server(launch_id=launch_id)
+            if server_info is not None:
+                return server_info
+            time.sleep(0.5)
+
+    def launch(self, launch_args):
+        """Prepare all required data, launch host and connect to it.
+
+        TVPaint plugin starts a websocket server and stores information
+        about it to servers directory. The launch id is used to find
+        server of the launched process.
         """
         if platform.system().lower() == "windows":
             self._prepare_windows_plugin(launch_args)
 
-        # Launch TVPaint and the websocket server.
+        self._create_client()
+
+        launch_id = uuid.uuid4().hex
+        env = {LAUNCH_ID_ENV_KEY: launch_id}
         log.info("Launching TVPaint")
-        self.websocket_server = WebSocketServer()
+        self._launch_tv_paint(launch_args, env)
 
-        self._create_routes()
-        server_url = f"ws://localhost:{self.websocket_server.port}"
-        os.environ["AYON_RPC_URL"] = server_url
-        log.info(f"Added request handler for url: {server_url}")
+        log.info("Waiting for TVPaint server")
+        server_info = self._wait_for_server(launch_id)
+        if server_info is None:
+            log.debug("Host process is not alive. Exiting")
+            self._exit(1)
+            return
 
-        self._start_webserver()
-
-        # Start TVPaint when server is running
-        self._launch_tv_paint(launch_args)
-
-        log.info("Waiting for client connection")
-        while True:
-            if self.process.poll() is not None:
-                log.debug("Host process is not alive. Exiting")
-                self._exit(1)
-                return
-
-            if self.websocket_rpc.client_connected():
-                log.info("Client has connected")
-                break
-            time.sleep(0.5)
+        self.connect(server_info)
 
         self._on_client_connect()
 
         emit_event("application.launched")
 
+    def attach(self, server_info, workfile_path=None):
+        """Use already running TVPaint which has no host client.
+
+        TVPaint is single instance application, so it can't be launched
+        again. The workfile is opened the same way as if it was passed to
+        launched TVPaint, its context is stored on 'application.launched'.
+
+        Args:
+            server_info (TVPaintServerInfo): Server of running TVPaint.
+            workfile_path (Optional[str]): Workfile to open.
+
+        """
+        from ayon_core.pipeline import registered_host
+
+        self._create_client()
+        self.process = _RunningProcess(server_info.pid)
+        self.connect(server_info)
+
+        self._on_client_connect()
+
+        if workfile_path:
+            log.info(f"Opening workfile '{workfile_path}'")
+            registered_host().open_workfile(workfile_path)
+
+        emit_event("application.launched")
+
+    def connect(self, server_info):
+        """Connect to server of running TVPaint.
+
+        Args:
+            server_info (TVPaintServerInfo): Server to connect to.
+
+        """
+        log.info(f"Connecting to TVPaint server {server_info.url}")
+        self.server_info = server_info
+        self.rpc_client.connect(server_info.url)
+        log.info("Connected to TVPaint")
+
     def _on_client_connect(self):
-        self._initial_textfile_write()
-
-    def _initial_textfile_write(self):
-        """Show popup about Write to file at start of TVPaint."""
-        tmp_file = tempfile.NamedTemporaryFile(
-            mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-        )
-        tmp_file.close()
-        tmp_filepath = tmp_file.name.replace("\\", "/")
-        george_script = (
-            "tv_writetextfile \"strict\" \"append\" \"{}\" \"empty\""
-        ).format(tmp_filepath)
-
-        result = CommunicationWrapper.execute_george(george_script)
-
-        # Remote the file
-        os.remove(tmp_filepath)
-
-        if result is None:
-            log.warning(
-                "Host was probably closed before plugin was initialized."
-            )
-        elif result.lower() == "forbidden":
-            log.warning("User didn't confirm saving files.")
-
-    def _client(self):
-        if not self.websocket_rpc:
-            log.warning("Communicator's server did not start yet.")
-            return None
-
-        for client in self.websocket_rpc.clients:
-            if not client.ws.closed:
-                return client
-        log.warning("Client is not yet connected to Communicator.")
-        return None
+        pass
 
     def client(self):
-        if not self._connected_client or self._connected_client.ws.closed:
-            self._connected_client = self._client()
-        return self._connected_client
+        if not self.is_connected:
+            log.warning("Communicator is not connected to TVPaint.")
+            return None
+        return self.rpc_client
 
     def send_request(self, method, params=None):
         client = self.client()
         if not client:
-            return
-
-        return self.websocket_rpc.send_request(
-            client, method, params
-        )
+            return None
+        try:
+            return client.send_request(method, params)
+        except ConnectionError:
+            log.warning("Connection to TVPaint was closed.")
+            return None
 
     def send_notification(self, method, params=None):
         client = self.client()
         if not client:
             return
-
-        self.websocket_rpc.send_notification(
-            client, method, params
-        )
+        try:
+            client.send_notification(method, params)
+        except ConnectionError:
+            log.warning("Connection to TVPaint was closed.")
 
     def execute_george(self, george_script):
-        """Execute passed goerge script in TVPaint."""
+        """Execute single line george command in TVPaint.
+
+        Returns:
+            Optional[str]: Output of the command, None if not connected.
+
+        """
         return self.send_request(
             "execute_george", [george_script]
         )
 
+    def execute_george_batch(self, commands):
+        """Execute single line george commands in TVPaint.
+
+        Commands are executed one after another in a single TVPaint tick.
+
+        Args:
+            commands (Iterable[str]): George commands.
+
+        Returns:
+            Optional[list[str]]: Output of each command, None if not
+                connected.
+
+        """
+        commands = list(commands)
+        if not commands:
+            return []
+        return self.send_request("execute_george_batch", [commands])
+
+    def get_layer_ids(self):
+        """Ids of all layers in current clip.
+
+        Returns:
+            Optional[list[int]]: Layer ids, None if not connected.
+
+        """
+        return self.send_request("get_layer_ids")
+
+    def get_group_count(self):
+        """Number of color groups, without the default group 0.
+
+        Returns:
+            Optional[int]: Number of groups, None if not connected.
+
+        """
+        return self.send_request("get_group_count")
+
     def execute_george_through_file(self, george_script):
         """Execute george script with temp file.
 
-        Allows to execute multiline george script without stopping websocket
-        client.
+        Deprecated:
+            Use 'execute_george' or 'execute_george_batch' with single line
+            commands instead. Kept for george scripts which need variables
+            or control flow, e.g. scripts sent in worker jobs.
 
         On windows make sure script does not contain paths with backwards
         slashes in paths, TVPaint won't execute properly in that case.
@@ -867,13 +1244,9 @@ class QtCommunicator(BaseCommunicator):
         self.callback_queue = collections.deque()
         self.qt_app = qt_app
 
-    def _create_routes(self):
-        self.websocket_rpc = QtTVPaintRpc(
-            self, loop=self.websocket_server.loop
-        )
-        self.websocket_server.add_route(
-            "*", "/", self.websocket_rpc.handle_request
-        )
+    def _create_client(self):
+        super()._create_client()
+        QtTVPaintRpc(self).register(self.rpc_client)
 
     def execute_in_main_thread(self, main_thread_item, wait=True):
         """Add `MainThreadItem` to callback queue and wait for result."""
@@ -905,8 +1278,21 @@ class QtCommunicator(BaseCommunicator):
         return None
 
     def _on_client_connect(self):
+        self._register_host_client()
         super()._on_client_connect()
         self._build_menu()
+
+    def _register_host_client(self):
+        """Let other AYON processes know this process controls TVPaint."""
+        try:
+            self.rpc_client.send_request(
+                "register_host", [get_host_client_info()]
+            )
+        except TVPaintRpcError:
+            log.warning(
+                "Failed to register as host client of TVPaint",
+                exc_info=True
+            )
 
     def _build_menu(self):
         self.send_request(

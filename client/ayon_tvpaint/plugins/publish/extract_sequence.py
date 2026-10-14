@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import copy
 import tempfile
 from typing import Any
 
@@ -15,7 +14,9 @@ from ayon_core.pipeline.publish import (
 )
 from ayon_tvpaint.api.lib import (
     execute_george,
-    execute_george_through_file,
+    execute_george_batch,
+    george_path,
+    george_string,
     get_layers_pre_post_behavior,
     get_layers_exposure_frames,
 )
@@ -240,30 +241,21 @@ class ExtractSequence(pyblish.api.InstancePlugin):
 
         bg_color = self._get_review_bg_color()
 
+        export_path = george_string(george_path(first_frame_filepath))
         george_script_lines = [
             # Change bg color to color from settings
-            "tv_background \"color\" {} {} {}".format(*bg_color),
-            "tv_SaveMode \"PNG\"",
-            "export_path = \"{}\"".format(
-                first_frame_filepath.replace("\\", "/")
-            ),
-            "tv_savesequence '\"'export_path'\"' {} {}".format(
-                mark_in, mark_out
-            )
+            "tv_background color {} {} {}".format(*bg_color),
+            "tv_SaveMode PNG",
+            f"tv_savesequence {export_path} {mark_in} {mark_out}",
         ]
         if scene_bg_color:
             # Change bg color back to previous scene bg color
-            _scene_bg_color = copy.deepcopy(scene_bg_color)
-            bg_type = _scene_bg_color.pop(0)
-            orig_color_command = [
-                "tv_background",
-                "\"{}\"".format(bg_type)
-            ]
-            orig_color_command.extend(_scene_bg_color)
+            # - background type is a keyword and must not be quoted
+            george_script_lines.append(
+                " ".join(["tv_background", *scene_bg_color])
+            )
 
-            george_script_lines.append(" ".join(orig_color_command))
-
-        execute_george_through_file("\n".join(george_script_lines))
+        execute_george_batch(george_script_lines)
 
         first_frame_filepath = None
         output_filepaths_by_frame_idx = {}
@@ -459,7 +451,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         layer_id = layer["layer_id"]
         george_script_lines = [
             f"tv_layerset {layer_id}",
-            "tv_SaveMode \"PNG\""
+            "tv_SaveMode PNG"
         ]
 
         filepaths_by_frame = {}
@@ -481,13 +473,16 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             # Go to frame
             george_script_lines.append(f"tv_layerImage {frame_idx}")
             # Store image to output
-            george_script_lines.append(f"tv_saveimage \"{dst_path}\"")
+            # - path is the rest of the line and must not be quoted
+            george_script_lines.append(
+                f"tv_saveimage {george_path(dst_path)}"
+            )
 
         self.log.debug("Rendering Exposure frames {} of layer {} ({})".format(
             ",".join(frames_to_render), layer_id, layer["name"]
         ))
         # Let TVPaint render layer's image
-        execute_george_through_file("\n".join(george_script_lines))
+        execute_george_batch(george_script_lines)
 
         # Apply layer opacity
         if transparency != 1.0:
