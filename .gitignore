@@ -8,6 +8,7 @@ __pycache__/
 
 # C extensions
 *.so
+!client/ayon_tvpaint/tvpaint_plugin/linux_x64/plugin/AYONPlugin.so
 
 # Distribution / packaging
 .Python
