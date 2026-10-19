@@ -50,6 +50,9 @@ fn main() {
             build.define("WIN32", None);
         }
         build.define("_CRT_SECURE_NO_WARNINGS", None);
+    } else if target_os == "linux" {
+        // TVPaint SDK uses 'LINUX' to choose 'PIPixel' channel order.
+        build.define("LINUX", None);
     }
 
     build.compile("tvpaint_sdk");

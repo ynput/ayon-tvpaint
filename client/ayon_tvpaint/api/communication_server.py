@@ -14,6 +14,7 @@ import filecmp
 import tempfile
 import threading
 import shutil
+import shlex
 import concurrent.futures
 
 import aiohttp
@@ -976,11 +977,79 @@ class BaseCommunicator:
             )
         raise RuntimeError(" & ".join(msg_parts))
 
-    def _launch_tv_paint(self, launch_args, env=None):
-        flags = (
-            subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NEW_PROCESS_GROUP
+    @staticmethod
+    def _get_linux_install_dir(executable):
+        """TVPaint installation folder from executable.
+
+        Executable in PATH (e.g. '/usr/bin/tvp-animation-11.7.6-pro') is
+        a symlink to executable in TVPaint installation folder.
+        """
+        executable = shutil.which(executable) or executable
+        return os.path.dirname(os.path.realpath(executable))
+
+    def _prepare_linux_plugin(self, launch_args):
+        """Copy plugin to TVPaint plugins.
+
+        TVPaint is installed by root, so the copy fails if the user can't
+        write to the installation folder. Then the plugin has to be copied
+        manually by an administrator.
+        """
+        plugin_dir = os.path.join(
+            get_plugin_files_path(), "linux_x64", "plugin"
         )
+        if not os.path.isdir(plugin_dir):
+            log.warning(
+                "TVPaint plugin for Linux is not available in '%s'.",
+                plugin_dir
+            )
+            return
+
+        host_plugins_path = os.path.join(
+            self._get_linux_install_dir(launch_args[0]), "plugins"
+        )
+
+        to_copy = []
+        for filename in os.listdir(plugin_dir):
+            src_full_path = os.path.join(plugin_dir, filename)
+            dst_full_path = os.path.join(host_plugins_path, filename)
+            if (
+                not os.path.exists(dst_full_path)
+                or not filecmp.cmp(src_full_path, dst_full_path)
+            ):
+                to_copy.append((src_full_path, dst_full_path))
+
+        invalid_copy = []
+        for src, dst in to_copy:
+            try:
+                shutil.copyfile(src, dst)
+            except OSError:
+                log.debug("Plugin copy failed", exc_info=True)
+                invalid_copy.append((src, dst))
+
+        if not invalid_copy:
+            return
+
+        commands = [
+            "sudo cp {} {}".format(shlex.quote(src), shlex.quote(dst))
+            for src, dst in invalid_copy
+        ]
+        raise RuntimeError(
+            "Failed to copy AYON plugin to TVPaint plugins. Copy it as"
+            " administrator: {}".format(" && ".join(commands))
+        )
+
+    def _launch_tv_paint(self, launch_args, env=None):
+        kwargs = {}
+        if platform.system().lower() == "windows":
+            kwargs["creationflags"] = (
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        else:
+            kwargs["start_new_session"] = True
+            # TVPaint looks for its 'data' relative to working directory
+            #   and shows modal "file not found" dialog if it's elsewhere.
+            kwargs["cwd"] = self._get_linux_install_dir(launch_args[0])
         _env = os.environ.copy()
         if env:
             _env.update(env)
@@ -995,10 +1064,7 @@ class BaseCommunicator:
                     new_path.append(path)
             env["PATH"] = os.pathsep.join(new_path)
 
-        kwargs = {
-            "env": env,
-            "creationflags": flags
-        }
+        kwargs["env"] = env
         self.process = subprocess.Popen(launch_args, **kwargs)
 
     def _create_client(self):
@@ -1045,8 +1111,11 @@ class BaseCommunicator:
         about it to servers directory. The launch id is used to find
         server of the launched process.
         """
-        if platform.system().lower() == "windows":
+        platform_name = platform.system().lower()
+        if platform_name == "windows":
             self._prepare_windows_plugin(launch_args)
+        elif platform_name == "linux":
+            self._prepare_linux_plugin(launch_args)
 
         self._create_client()
 

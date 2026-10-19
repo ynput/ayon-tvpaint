@@ -85,7 +85,7 @@ The project doesn't have to match. TVPaint's current context, project included, 
 
 Requirements:
 - Rust 1.83+ (https://rustup.rs)
-- C compiler (MSVC Build Tools on Windows, Xcode command line tools on macOS)
+- C compiler (MSVC Build Tools on Windows, Xcode command line tools on macOS, gcc on Linux)
 - TVPaint SDK, which you can request from TVPaint support. It is not redistributable.
 
 Set `TVPAINT_SDK_DIR` to the SDK root (the folder containing `include/` and `lib/dllx.c`) and build:
@@ -106,6 +106,16 @@ cargo build --release --target i686-pc-windows-msvc
 - `target/i686-pc-windows-msvc/release/AYONPlugin.dll` -> `client/ayon_tvpaint/tvpaint_plugin/windows_x86/plugin/AYONPlugin.dll`
 
 The C runtime is linked statically (see `.cargo/config.toml`), so the DLL only needs system libraries.
+
+On Linux, the library links to the glibc of the build machine and doesn't run on systems with older glibc. Build it in a Rocky Linux 8 container (glibc 2.28), so it runs on Rocky 8+ and Ubuntu 20.04+:
+
+```shell
+docker run --rm -v "$PWD":/src -v "$TVPAINT_SDK_DIR":/sdk:ro -e TVPAINT_SDK_DIR=/sdk -e CARGO_TARGET_DIR=/src/target/rocky8 -w /src rockylinux:8 bash -c "dnf install -y gcc && curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && /root/.cargo/bin/cargo build --release"
+```
+
+- `target/rocky8/release/libAYONPlugin.so` -> `client/ayon_tvpaint/tvpaint_plugin/linux_x64/plugin/AYONPlugin.so`
+
+TVPaint loads plugins from `plugins` in its installation folder (e.g. `/usr/share/tvpaint-developpement/tvp-animation-11.7.6-pro/plugins`), which is owned by root. The launch copies the plugin there when it's missing or different. If the user can't write to the folder, the launch fails with the `sudo cp` command to run.
 
 ## Layout
 
