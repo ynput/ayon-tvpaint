@@ -115,7 +115,13 @@ docker run --rm -v "$PWD":/src -v "$TVPAINT_SDK_DIR":/sdk:ro -e TVPAINT_SDK_DIR=
 
 - `target/rocky8/release/libAYONPlugin.so` -> `client/ayon_tvpaint/tvpaint_plugin/linux_x64/plugin/AYONPlugin.so`
 
-TVPaint loads plugins from `plugins` in its installation folder (e.g. `/usr/share/tvpaint-developpement/tvp-animation-11.7.6-pro/plugins`), which is owned by root. The launch copies the plugin there when it's missing or different. If the user can't write to the folder, the launch fails with the `sudo cp` command to run.
+On Linux, TVPaint loads plugins from `plugins` in its installation folder (e.g. `/usr/share/tvpaint-developpement/tvp-animation-11.7.6-pro/plugins`, owned by root) and from `plugins` in the active user profile (e.g. `~/.tvp/tvp animation 11 pro/default/plugins`, the profile is set in `system.ini` next to it). Tested with TVPaint 11.7.6, other folders like `/usr/share/tvpaint-animation` are not used. A plugin in both folders is loaded twice. The launch copies the plugin when it's missing or different:
+
+- To the user profile, which doesn't need admin permissions.
+- To the installation folder if the plugin is already there (e.g. installed by an administrator), and removes it from the user profile.
+- To the installation folder before TVPaint created the user profile on its first start. TVPaint crashes on start if the profile folder exists before that, so it is not created by the launch.
+
+If the copy to the installation folder fails, the launch fails with the `sudo cp` command to run.
 
 ## Layout
 

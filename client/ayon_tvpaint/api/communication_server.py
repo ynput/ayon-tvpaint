@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import uuid
@@ -12,6 +13,7 @@ import logging
 import platform
 import filecmp
 import tempfile
+import configparser
 import threading
 import shutil
 import shlex
@@ -987,12 +989,58 @@ class BaseCommunicator:
         executable = shutil.which(executable) or executable
         return os.path.dirname(os.path.realpath(executable))
 
+    @staticmethod
+    def _get_linux_profile_dir(install_dir):
+        """TVPaint user profile folder, if TVPaint already created it.
+
+        TVPaint loads plugins also from 'plugins' in the active profile,
+        e.g. '~/.tvp/tvp animation 11 pro/default/plugins' for
+        'tvp-animation-11.7.6-pro'. The profile is created on the first
+        start, and TVPaint crashes on start when the profile folder exists
+        before that. So it is used only when it contains 'config.ini'.
+
+        Returns:
+            Optional[str]: Path to profile folder or None.
+        """
+        match = re.match(
+            r"^tvp-animation-(\d+)[\d.]*-(\w+)$",
+            os.path.basename(install_dir)
+        )
+        if match is None:
+            return None
+        major, edition = match.groups()
+        app_dir = os.path.join(
+            os.path.expanduser("~"),
+            ".tvp",
+            f"tvp animation {major} {edition}",
+        )
+        profile = "default"
+        parser = configparser.ConfigParser()
+        try:
+            # File starts with BOM
+            parser.read(
+                os.path.join(app_dir, "system.ini"), encoding="utf-8-sig"
+            )
+            profile = parser.get("system", "config", fallback=profile)
+        except configparser.Error:
+            pass
+
+        profile_dir = os.path.join(app_dir, profile)
+        if not os.path.exists(os.path.join(profile_dir, "config.ini")):
+            return None
+        return profile_dir
+
     def _prepare_linux_plugin(self, launch_args):
         """Copy plugin to TVPaint plugins.
 
-        TVPaint is installed by root, so the copy fails if the user can't
-        write to the installation folder. Then the plugin has to be copied
-        manually by an administrator.
+        Plugin is copied to 'plugins' in TVPaint user profile, which does
+        not require admin permissions. Plugin in TVPaint installation is
+        used instead if it's there, e.g. installed by administrator,
+        because TVPaint would load both.
+
+        The installation is used also before TVPaint created the user
+        profile. TVPaint is installed by root, so the copy fails if the
+        user can't write to the installation folder.
         """
         plugin_dir = os.path.join(
             get_plugin_files_path(), "linux_x64", "plugin"
@@ -1004,14 +1052,44 @@ class BaseCommunicator:
             )
             return
 
-        host_plugins_path = os.path.join(
-            self._get_linux_install_dir(launch_args[0]), "plugins"
+        filenames = os.listdir(plugin_dir)
+        install_dir = self._get_linux_install_dir(launch_args[0])
+        install_plugins_dir = os.path.join(install_dir, "plugins")
+        profile_dir = self._get_linux_profile_dir(install_dir)
+        in_installation = any(
+            os.path.exists(os.path.join(install_plugins_dir, filename))
+            for filename in filenames
         )
+        if profile_dir is not None and not in_installation:
+            self._copy_linux_plugin(
+                plugin_dir, os.path.join(profile_dir, "plugins")
+            )
+            return
 
+        # Remove plugin from user profile to not load it twice
+        if profile_dir is not None:
+            for filename in filenames:
+                path = os.path.join(profile_dir, "plugins", filename)
+                if os.path.exists(path):
+                    os.remove(path)
+
+        try:
+            self._copy_linux_plugin(plugin_dir, install_plugins_dir)
+        except RuntimeError as exc:
+            message = str(exc)
+            if profile_dir is None and not in_installation:
+                message += (
+                    "\nOr start TVPaint once without AYON to create its"
+                    " user profile, then the plugin is copied there."
+                )
+            raise RuntimeError(message) from exc
+
+    @staticmethod
+    def _copy_linux_plugin(src_dir, dst_dir):
         to_copy = []
-        for filename in os.listdir(plugin_dir):
-            src_full_path = os.path.join(plugin_dir, filename)
-            dst_full_path = os.path.join(host_plugins_path, filename)
+        for filename in os.listdir(src_dir):
+            src_full_path = os.path.join(src_dir, filename)
+            dst_full_path = os.path.join(dst_dir, filename)
             if (
                 not os.path.exists(dst_full_path)
                 or not filecmp.cmp(src_full_path, dst_full_path)
@@ -1021,6 +1099,7 @@ class BaseCommunicator:
         invalid_copy = []
         for src, dst in to_copy:
             try:
+                os.makedirs(dst_dir, exist_ok=True)
                 shutil.copyfile(src, dst)
             except OSError:
                 log.debug("Plugin copy failed", exc_info=True)
