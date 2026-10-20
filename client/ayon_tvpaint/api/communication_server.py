@@ -1043,7 +1043,7 @@ class BaseCommunicator:
         user can't write to the installation folder.
         """
         plugin_dir = os.path.join(
-            get_plugin_files_path(), "linux_x64", "plugin"
+            get_plugin_files_path(), "linux", "plugin"
         )
         if not os.path.isdir(plugin_dir):
             log.warning(
