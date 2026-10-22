@@ -14,7 +14,9 @@ from ayon_core.pipeline.workfile import (
 from ayon_core.pipeline.template_data import get_template_data_with_names
 from ayon_tvpaint.api import plugin
 from ayon_tvpaint.api.lib import (
-    execute_george_through_file,
+    execute_george,
+    george_path,
+    george_string,
 )
 from ayon_tvpaint.api.pipeline import (
     get_current_workfile_context,
@@ -47,10 +49,9 @@ class LoadWorkfile(plugin.Loader):
         current_file = host.get_current_workfile()
         work_context = get_current_workfile_context()
 
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(
-            filepath
+        execute_george(
+            f"tv_LoadProject {george_string(george_path(filepath))}"
         )
-        execute_george_through_file(george_script)
 
         # Save workfile.
         host_name = "tvpaint"

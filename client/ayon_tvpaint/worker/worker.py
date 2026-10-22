@@ -26,18 +26,20 @@ class TVPaintWorkerCommunicator(BaseCommunicator):
         self._server_url = server_url
         self._worker_connection = None
 
-    def _start_webserver(self):
-        """Create connection to workers server before TVPaint server."""
-        loop = self.websocket_server.loop
+    def _create_client(self):
+        """Create connection to workers server before TVPaint is launched.
+
+        Worker connection runs in the asyncio loop of TVPaint client.
+        """
+        super()._create_client()
+        loop = self.rpc_client.loop
         self._worker_connection = WorkerJobsConnection(
             self._server_url, "tvpaint", loop
         )
-        asyncio.ensure_future(
+        asyncio.run_coroutine_threadsafe(
             self._worker_connection.main_loop(register_worker=False),
-            loop=loop
+            loop
         )
-
-        super()._start_webserver()
 
     def _open_init_file(self):
         """Open init TVPaint file.
@@ -53,8 +55,7 @@ class TVPaintWorkerCommunicator(BaseCommunicator):
             tmp_filepath = tmp_file.name.replace("\\", "/")
 
         shutil.copy(init_filepath, tmp_filepath)
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(tmp_filepath)
-        self.execute_george_through_file(george_script)
+        self.execute_george(f'tv_LoadProject "{tmp_filepath}"')
         self.execute_george("tv_projectclose")
         os.remove(tmp_filepath)
 
@@ -82,10 +83,14 @@ class TVPaintWorkerCommunicator(BaseCommunicator):
             return True
 
         if self.process.poll() is not None:
-            asyncio.ensure_future(
+            future = asyncio.run_coroutine_threadsafe(
                 self._worker_connection.disconnect(),
-                loop=self.websocket_server.loop
+                self.rpc_client.loop
             )
+            try:
+                future.result(5)
+            except Exception:
+                pass
             self._exit()
             return False
         return True

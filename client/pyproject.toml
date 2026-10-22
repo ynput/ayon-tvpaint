@@ -1,6 +1,3 @@
 [project]
 name="tvpaint"
 description="AYON TVPaint addon."
-
-[ayon.runtimeDependencies]
-aiohttp_json_rpc = "*"

@@ -140,7 +140,12 @@ class BaseCommand(ABC):
         return self.parent.execute_george(george_script)
 
     def execute_george_through_file(self, george_script):
-        """Execute george script through temp file in TVPaint."""
+        """Execute george script through temp file in TVPaint.
+
+        Deprecated:
+            Use 'execute_george' with single line commands instead.
+
+        """
         return self.parent.execute_george_through_file(george_script)
 
 
@@ -169,6 +174,10 @@ class ExecuteSimpleGeorgeScript(BaseCommand):
 
 class ExecuteGeorgeScript(BaseCommand):
     """Execute multiline george script in TVPaint.
+
+    The script is executed with 'tv_runscript' through a temp file, because
+    it can contain george variables and control flow which can't be
+    executed command by command. Prefer 'ExecuteSimpleGeorgeScript'.
 
     Args:
         script_lines(list): Lines that will be executed in george script
@@ -511,13 +520,13 @@ class ProcessTVPaintCommands(TVPaintCommands):
         """Open workfile in TVPaint."""
         workfile = self._workfile
         print("Opening workfile {}".format(workfile))
-        george_script = "tv_LoadProject '\"'\"{}\"'\"'".format(workfile)
-        self.execute_george_through_file(george_script)
+        workfile_path = workfile.replace("\\", "/")
+        self.execute_george(f'tv_LoadProject "{workfile_path}"')
 
     def _close_workfile(self):
         """Close workfile in TVPaint."""
         print("Closing workfile")
-        self.execute_george_through_file("tv_projectclose")
+        self.execute_george("tv_projectclose")
 
     def execute(self):
         """Execute commands."""
