@@ -1149,8 +1149,9 @@ class BaseCommunicator:
         contents_dir = os.path.dirname(
             os.path.dirname(os.path.realpath(executable))
         )
+        plist_path = os.path.join(contents_dir, "Info.plist")
         try:
-            with open(os.path.join(contents_dir, "Info.plist"), "rb") as stream:
+            with open(plist_path, "rb") as stream:
                 bundle_name = plistlib.load(stream).get("CFBundleName") or ""
         except (OSError, plistlib.InvalidFileException):
             log.debug("Failed to read TVPaint Info.plist", exc_info=True)
