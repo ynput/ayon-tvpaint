@@ -123,6 +123,18 @@ On Linux, TVPaint loads plugins from `plugins` in its installation folder (e.g. 
 
 If the copy to the installation folder fails, the launch fails with the `sudo cp` command to run.
 
+On macOS, TVPaint loads plugins as `.bundle` packages. Build the universal (arm64 + x86_64) bundle into the addon with:
+
+```shell
+./build_macos.sh
+```
+
+It builds both architectures and merges them with `lipo` into `client/ayon_tvpaint/tvpaint_plugin/macos/plugin/AYONPlugin.bundle/Contents/MacOS/AYONPlugin`. The bundle contains only the executable, which must have the same name as the bundle. TVPaint doesn't need `Info.plist` or a bundle signature, and doesn't load a plain `.dylib` or `.so` (tested with TVPaint 11.7.6, native arm64 and x86_64 under Rosetta). arm64 code must be signed to be loaded, the linker signs it ad-hoc automatically. TVPaint is built with hardened runtime, but it loads ad-hoc signed and unsigned plugins.
+
+TVPaint loads plugins also from `plugins` in the active user profile (e.g. `~/Library/tvp animation 11 pro/default/plugins`, the profile is set in `system.ini` next to it). The launch copies the bundle there when it's missing or different. The application bundle is not changed, that would break its code signature. The profile is created on the first start of TVPaint, so the launch fails until TVPaint was started once without AYON.
+
+TVPaint on macOS stores image pixels in `.tvpp` files as ARGB, on Windows and Linux as BGRA. The order is stored in the `DPEL` chunk of the file and TVPaint reads both, so files can be shared between platforms.
+
 ## Layout
 
 - `src/lib.rs`: `PI_*` entry points called by TVPaint, menu, and request handling.

@@ -53,6 +53,9 @@ fn main() {
     } else if target_os == "linux" {
         // TVPaint SDK uses 'LINUX' to choose 'PIPixel' channel order.
         build.define("LINUX", None);
+    } else if target_os == "macos" {
+        // TVPaint SDK uses 'MACOSX' to choose 'PIPixel' channel order.
+        build.define("MACOSX", None);
     }
 
     build.compile("tvpaint_sdk");

@@ -12,6 +12,7 @@ import ctypes
 import logging
 import platform
 import filecmp
+import plistlib
 import tempfile
 import configparser
 import threading
@@ -1009,11 +1010,24 @@ class BaseCommunicator:
         if match is None:
             return None
         major, edition = match.groups()
-        app_dir = os.path.join(
+        return BaseCommunicator._get_profile_dir(os.path.join(
             os.path.expanduser("~"),
             ".tvp",
             f"tvp animation {major} {edition}",
-        )
+        ))
+
+    @staticmethod
+    def _get_profile_dir(app_dir):
+        """Active profile in TVPaint user folder, if it contains 'config.ini'.
+
+        Args:
+            app_dir (str): TVPaint user folder with 'system.ini', e.g.
+                '~/.tvp/tvp animation 11 pro' on Linux or
+                '~/Library/tvp animation 11 pro' on macOS.
+
+        Returns:
+            Optional[str]: Path to profile folder or None.
+        """
         profile = "default"
         parser = configparser.ConfigParser()
         try:
@@ -1117,6 +1131,97 @@ class BaseCommunicator:
             " administrator: {}".format(" && ".join(commands))
         )
 
+    @staticmethod
+    def _get_macos_profile_dir(executable):
+        """TVPaint user profile folder, if TVPaint already created it.
+
+        TVPaint loads plugins also from 'plugins' in the active profile,
+        e.g. '~/Library/tvp animation 11 pro/default/plugins' for
+        'TVPaint Animation 11.7 Pro.app' with bundle name
+        'TVPaint Animation 11 Pro'.
+
+        Args:
+            executable (str): Path to executable in '*.app/Contents/MacOS'.
+
+        Returns:
+            Optional[str]: Path to profile folder or None.
+        """
+        contents_dir = os.path.dirname(
+            os.path.dirname(os.path.realpath(executable))
+        )
+        try:
+            with open(os.path.join(contents_dir, "Info.plist"), "rb") as stream:
+                bundle_name = plistlib.load(stream).get("CFBundleName") or ""
+        except (OSError, plistlib.InvalidFileException):
+            log.debug("Failed to read TVPaint Info.plist", exc_info=True)
+            return None
+        match = re.match(r"^TVPaint Animation (\d+) (\w+)$", bundle_name)
+        if match is None:
+            return None
+        major, edition = match.groups()
+        return BaseCommunicator._get_profile_dir(os.path.join(
+            os.path.expanduser("~"),
+            "Library",
+            f"tvp animation {major} {edition}".lower(),
+        ))
+
+    def _prepare_macos_plugin(self, launch_args):
+        """Copy plugin bundle to 'plugins' in TVPaint user profile.
+
+        The application bundle is not changed, that would break its code
+        signature. The profile is created on the first start of TVPaint.
+        """
+        bundle_name = "AYONPlugin.bundle"
+        src_bundle = os.path.join(
+            get_plugin_files_path(), "macos", "plugin", bundle_name
+        )
+        if not os.path.isdir(src_bundle):
+            log.warning(
+                "TVPaint plugin for macOS is not available in '%s'.",
+                src_bundle
+            )
+            return
+
+        profile_dir = self._get_macos_profile_dir(launch_args[0])
+        if profile_dir is None:
+            raise RuntimeError(
+                "TVPaint user profile was not found. Start TVPaint once"
+                " without AYON to create it, then the AYON plugin is copied"
+                " to its plugins."
+            )
+
+        dst_bundle = os.path.join(profile_dir, "plugins", bundle_name)
+        if self._dirs_match(src_bundle, dst_bundle):
+            return
+        if os.path.exists(dst_bundle):
+            shutil.rmtree(dst_bundle)
+        os.makedirs(os.path.dirname(dst_bundle), exist_ok=True)
+        shutil.copytree(src_bundle, dst_bundle)
+
+    @staticmethod
+    def _dirs_match(src_dir, dst_dir):
+        """Folders contain the same files with the same content."""
+        def _relative_files(root):
+            return {
+                os.path.relpath(os.path.join(dirpath, filename), root)
+                for dirpath, _, filenames in os.walk(root)
+                for filename in filenames
+            }
+
+        if not os.path.isdir(dst_dir):
+            return False
+        src_files = _relative_files(src_dir)
+        if src_files != _relative_files(dst_dir):
+            return False
+        return all(
+            filecmp.cmp(
+                os.path.join(src_dir, path),
+                os.path.join(dst_dir, path),
+                shallow=False,
+            )
+            for path in src_files
+        )
+
     def _launch_tv_paint(self, launch_args, env=None):
         kwargs = {}
         if platform.system().lower() == "windows":
@@ -1195,6 +1300,8 @@ class BaseCommunicator:
             self._prepare_windows_plugin(launch_args)
         elif platform_name == "linux":
             self._prepare_linux_plugin(launch_args)
+        elif platform_name == "darwin":
+            self._prepare_macos_plugin(launch_args)
 
         self._create_client()
 
