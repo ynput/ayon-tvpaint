@@ -1,5 +1,8 @@
 import os
 import json
+import zlib
+import base64
+import binascii
 import logging
 
 import requests
@@ -37,7 +40,9 @@ from .communication_server import CommunicationWrapper, MainThreadItem
 log = logging.getLogger(__name__)
 
 
-METADATA_SECTION = "avalon"
+METADATA_SECTION = "ayon"
+# Older workfiles stored metadata to project under 'avalon' section
+LEGACY_METADATA_SECTION = "avalon"
 SECTION_NAME_CONTEXT = "context"
 SECTION_NAME_CREATE_CONTEXT = "create_context"
 SECTION_NAME_INSTANCES = "instances"
@@ -48,7 +53,8 @@ TVPAINT_CHUNK_LENGTH = 500
 
 """TVPaint's Metadata
 
-Metadata are stored to TVPaint's workfile.
+Metadata are stored to clip of TVPaint's workfile under 'ayon' section.
+Values are json strings compressed with zlib and encoded with base64.
 
 Workfile works similar to .ini file but has few limitation. Most important
 limitation is that value under key has limited length. Due to this limitation
@@ -61,11 +67,16 @@ expected that there are also keys `["instances0", "instances1"]`.
 
 Workfile data looks like:
 ```
-[avalon]
-instances0=[{{__dq__}id{__dq__}: {__dq__}ayon.create.instance{__dq__...
+[ayon]
+instances0=eJyLrlbKS8xNVbJSUEpKLM7MS1aqBQBDOgZ7...
 instances1=...more data...
 instances=2
 ```
+
+Older workfiles stored metadata to project under 'avalon' section. Values
+were json strings with quotes replaced by '{__sq__}' and '{__dq__}'
+placeholders. These are converted to clip metadata when the metadata key is
+read for the first time.
 """
 
 
@@ -386,8 +397,114 @@ def split_metadata_string(text, chunk_length=None):
     return chunks
 
 
+def _read_metadata_command(metadata_key, legacy=False):
+    if legacy:
+        section = george_string(LEGACY_METADATA_SECTION)
+        return (
+            f'tv_ReadProjectString {section} {george_string(metadata_key)} ""'
+        )
+    section = george_string(METADATA_SECTION)
+    return f'tv_ReadClipString {section} {george_string(metadata_key)} ""'
+
+
+def _write_metadata_command(metadata_key, value, legacy=False):
+    if legacy:
+        section = george_string(LEGACY_METADATA_SECTION)
+        return (
+            f"tv_WriteProjectString {section}"
+            f" {george_string(metadata_key)} {george_string(value)}"
+        )
+    section = george_string(METADATA_SECTION)
+    return (
+        f"tv_WriteClipString {section}"
+        f" {george_string(metadata_key)} {george_string(value)}"
+    )
+
+
+def _get_metadata_chunk_keys(metadata_key, value):
+    """Metadata keys holding chunks of value stored under metadata key.
+
+    Returns:
+        Optional[list[str]]: Chunk keys, or None if the value is stored
+            directly under the metadata key.
+
+    """
+    # NOTE Backwards compatibility when metadata key did not store range of key
+    #   indexes but the value itself
+    # NOTE We don't have to care about negative values with `isdecimal` check
+    stripped_value = value.strip()
+    if not stripped_value.isdecimal():
+        return None
+    return [
+        f"{metadata_key}{idx}"
+        for idx in range(int(stripped_value))
+    ]
+
+
+def _read_metadata_string(metadata_key, value, legacy=False):
+    """Read full metadata string from value stored under metadata key."""
+    if not value or not value.strip():
+        return None
+
+    chunk_keys = _get_metadata_chunk_keys(metadata_key, value)
+    if chunk_keys is None:
+        metadata_string = value
+    else:
+        metadata_string = "".join(execute_george_batch(
+            _read_metadata_command(chunk_key, legacy)
+            for chunk_key in chunk_keys
+        ))
+
+    if legacy:
+        # Replace quotes plaholders with their values
+        return (
+            metadata_string
+            .replace("{__sq__}", "'")
+            .replace("{__dq__}", "\"")
+        )
+
+    try:
+        return zlib.decompress(
+            base64.b64decode(metadata_string, validate=True)
+        ).decode("utf-8")
+    except (binascii.Error, zlib.error, UnicodeDecodeError):
+        log.warning(
+            f"Failed to decode workfile metadata '{metadata_key}'.",
+            exc_info=True
+        )
+        return None
+
+
+def _convert_legacy_metadata(metadata_key, legacy_value):
+    """Move metadata key from legacy project metadata to clip metadata.
+
+    Returns:
+        Optional[str]: Metadata string.
+
+    """
+    metadata_string = _read_metadata_string(
+        metadata_key, legacy_value, legacy=True
+    )
+    log.info(
+        f"Converting workfile metadata '{metadata_key}'"
+        " from project metadata to clip metadata."
+    )
+    commands = _get_write_metadata_commands(metadata_key, metadata_string)
+    # Clear legacy values so they are not converted again
+    legacy_keys = [metadata_key]
+    chunk_keys = _get_metadata_chunk_keys(metadata_key, legacy_value)
+    if chunk_keys:
+        legacy_keys.extend(chunk_keys)
+    commands.extend(
+        _write_metadata_command(legacy_key, "", legacy=True)
+        for legacy_key in legacy_keys
+    )
+    execute_george_batch(commands)
+    return metadata_string
+
+
 def get_workfile_metadata_string_for_keys(metadata_keys):
-    """Read metadata for specific keys from current project workfile.
+    """Read metadata for specific keys from current clip of workfile.
 
     All values from entered keys are stored to single string without separator.
 
@@ -403,42 +520,27 @@ def get_workfile_metadata_string_for_keys(metadata_keys):
     if isinstance(metadata_keys, str):
         metadata_keys = [metadata_keys]
 
-    section = george_string(METADATA_SECTION)
     outputs = execute_george_batch(
-        f'tv_ReadProjectString {section} {george_string(metadata_key)} ""'
+        _read_metadata_command(metadata_key)
         for metadata_key in metadata_keys
     )
     return "".join(outputs)
 
 
 def get_workfile_metadata_string(metadata_key):
-    """Read metadata for specific key from current project workfile."""
-    result = get_workfile_metadata_string_for_keys([metadata_key])
-    if not result:
-        return None
+    """Read metadata for specific key from current clip of workfile.
 
-    stripped_result = result.strip()
-    if not stripped_result:
-        return None
-
-    # NOTE Backwards compatibility when metadata key did not store range of key
-    #   indexes but the value itself
-    # NOTE We don't have to care about negative values with `isdecimal` check
-    if not stripped_result.isdecimal():
-        metadata_string = result
-    else:
-        keys = []
-        for idx in range(int(stripped_result)):
-            keys.append("{}{}".format(metadata_key, idx))
-        metadata_string = get_workfile_metadata_string_for_keys(keys)
-
-    # Replace quotes plaholders with their values
-    metadata_string = (
-        metadata_string
-        .replace("{__sq__}", "'")
-        .replace("{__dq__}", "\"")
-    )
-    return metadata_string
+    Metadata stored in project metadata of older workfiles are converted
+    to clip metadata.
+    """
+    outputs = execute_george_batch([
+        _read_metadata_command(metadata_key),
+        _read_metadata_command(metadata_key, legacy=True),
+    ])
+    value, legacy_value = (list(outputs) + ["", ""])[:2]
+    if (not value or not value.strip()) and legacy_value.strip():
+        return _convert_legacy_metadata(metadata_key, legacy_value)
+    return _read_metadata_string(metadata_key, value)
 
 
 def get_workfile_metadata(metadata_key, default=None):
@@ -471,46 +573,39 @@ def get_workfile_metadata(metadata_key, default=None):
 
 
 def write_workfile_metadata(metadata_key, value):
-    """Write metadata for specific key into current project workfile.
+    """Write metadata for specific key into current clip of workfile.
 
-    George script has specific way how to work with quotes which should be
-    solved automatically with this function.
+    Value is compressed and base64 encoded, so it does not contain
+    characters that would have to be escaped in george commands.
 
     Args:
         metadata_key (str): Key defying under which key value will be stored.
         value (dict,list,str): Data to store they must be json serializable.
     """
+    execute_george_batch(_get_write_metadata_commands(metadata_key, value))
+
+
+def _get_write_metadata_commands(metadata_key, value):
     if isinstance(value, (dict, list)):
         value = json.dumps(value)
 
     if not value:
         value = ""
 
-    # Handle quotes in dumped json string
-    # - replace single and double quotes with placeholders
-    value = (
-        value
-        .replace("'", "{__sq__}")
-        .replace("\"", "{__dq__}")
-    )
-    chunks = split_metadata_string(value)
+    encoded_value = base64.b64encode(
+        zlib.compress(value.encode("utf-8"))
+    ).decode("ascii")
+    chunks = split_metadata_string(encoded_value)
     chunks_len = len(chunks)
 
-    section = george_string(METADATA_SECTION)
     # Add information about chunks length to metadata key itself
-    commands = [
-        f"tv_WriteProjectString {section}"
-        f" {george_string(metadata_key)} {george_string(chunks_len)}"
-    ]
+    commands = [_write_metadata_command(metadata_key, chunks_len)]
     # Add chunk values to indexed metadata keys
     for idx, chunk_value in enumerate(chunks):
-        sub_key = f"{metadata_key}{idx}"
         commands.append(
-            f"tv_WriteProjectString {section}"
-            f" {george_string(sub_key)} {george_string(chunk_value)}"
+            _write_metadata_command(f"{metadata_key}{idx}", chunk_value)
         )
-
-    execute_george_batch(commands)
+    return commands
 
 
 def get_current_workfile_context():

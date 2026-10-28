@@ -61,7 +61,7 @@ Commands are converted to the system ANSI code page, which TVPaint uses on Windo
 
 Each command parses its arguments differently (tested with TVPaint 11.7):
 - `tv_SaveProject`, `tv_SaveImage` and `tv_LayerCreate` take the rest of the line as the value, so it must not be quoted.
-- Other strings (`tv_LoadProject`, `tv_LoadSequence`, `tv_SoundClipNew`, `tv_LayerRename`, `tv_WriteProjectString`, ...) must be in double quotes.
+- Other strings (`tv_LoadProject`, `tv_LoadSequence`, `tv_SoundClipNew`, `tv_LayerRename`, `tv_WriteClipString`, ...) must be in double quotes.
 - Keywords (`tv_LayerColor get`, `tv_Background color`) must not be quoted. Quoted keywords fail or are silently ignored.
 - Double quotes can't be passed inside a string.
 - Missing files or folders make TVPaint show a modal dialog, which blocks it and the request. Check paths before sending the command.
