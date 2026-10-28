@@ -870,13 +870,47 @@ class BaseCommunicator:
         # Remove temp folder
         shutil.rmtree(tmp_dir)
 
+    @staticmethod
+    def _get_windows_profile_dir(executable_file):
+        """TVPaint user profile folder, if TVPaint already created it.
+
+        TVPaint loads plugins also from 'plugins' in the active profile,
+        e.g. '%APPDATA%/tvp animation 11 pro/default/plugins' for
+        'TVPaint Animation 11.7.4 Pro (64bits).exe'.
+
+        Only 64-bit TVPaint is supported, it is unknown if 32-bit TVPaint
+        uses the same profile.
+
+        Args:
+            executable_file (str): Filename of TVPaint executable.
+
+        Returns:
+            Optional[str]: Path to profile folder or None.
+        """
+        match = re.match(
+            r"^TVPaint Animation (\d+)[\d.]* (\w+) \(64bits\)\.exe$",
+            executable_file,
+            re.IGNORECASE,
+        )
+        appdata = os.environ.get("APPDATA")
+        if match is None or not appdata:
+            return None
+        major, edition = match.groups()
+        return BaseCommunicator._get_profile_dir(os.path.join(
+            appdata, f"tvp animation {major} {edition}".lower()
+        ))
+
     def _prepare_windows_plugin(self, launch_args):
         """Copy plugin to TVPaint plugins and set PATH to dependencies.
 
-        Check if plugin in TVPaint's plugins exist and match to plugin
-        version to current implementation version. Based on 64-bit or 32-bit
-        version of the plugin. Path to libraries required for plugin is added
-        to PATH variable.
+        Plugin is copied to 'plugins' in TVPaint user profile, which does
+        not require admin permissions. Plugin in TVPaint installation is
+        used instead while it's up to date, because TVPaint would load
+        both. Outdated plugin is removed from installation.
+
+        The installation is used also before TVPaint created the user
+        profile, and for 32-bit TVPaint. Changes in installation ask for
+        admin permissions.
         """
 
         host_executable = launch_args[0]
@@ -939,11 +973,44 @@ class BaseCommunicator:
             ):
                 to_copy.append((src_full_path, dst_full_path))
 
-        # Skip copy if everything is done
-        if not to_copy and not to_remove:
-            return
+        profile_plugins_dir = None
+        if subfolder == "windows_x64":
+            profile_dir = self._get_windows_profile_dir(executable_file)
+            if profile_dir is not None:
+                profile_plugins_dir = os.path.join(profile_dir, "plugins")
 
-        # Try to copy
+        if profile_plugins_dir is not None:
+            if to_copy:
+                # Use user profile instead of missing or outdated plugin
+                #   in installation, and remove the outdated plugin
+                to_remove.extend(
+                    dst for _src, dst in to_copy if os.path.exists(dst)
+                )
+                to_copy = []
+            else:
+                # Plugin in installation is up to date
+                for filename in os.listdir(plugin_dir):
+                    path = os.path.join(profile_plugins_dir, filename)
+                    if os.path.exists(path):
+                        os.remove(path)
+                profile_plugins_dir = None
+
+        if to_copy or to_remove:
+            self._process_windows_install_files(to_copy, to_remove)
+
+        if profile_plugins_dir is not None:
+            os.makedirs(profile_plugins_dir, exist_ok=True)
+            for filename in os.listdir(plugin_dir):
+                src_full_path = os.path.join(plugin_dir, filename)
+                dst_full_path = os.path.join(profile_plugins_dir, filename)
+                if (
+                    not os.path.exists(dst_full_path)
+                    or not filecmp.cmp(src_full_path, dst_full_path)
+                ):
+                    shutil.copyfile(src_full_path, dst_full_path)
+
+    def _process_windows_install_files(self, to_copy, to_remove):
+        """Copy and remove files in TVPaint installation and validate it."""
         try:
             self._windows_file_process(to_copy, to_remove)
         except Exception:
@@ -1022,6 +1089,7 @@ class BaseCommunicator:
 
         Args:
             app_dir (str): TVPaint user folder with 'system.ini', e.g.
+                '%APPDATA%/tvp animation 11 pro' on Windows,
                 '~/.tvp/tvp animation 11 pro' on Linux or
                 '~/Library/tvp animation 11 pro' on macOS.
 

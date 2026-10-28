@@ -107,6 +107,14 @@ cargo build --release --target i686-pc-windows-msvc
 
 The C runtime is linked statically (see `.cargo/config.toml`), so the DLL only needs system libraries.
 
+On Windows, TVPaint loads plugins from `plugins` in its installation folder (e.g. `C:\Program Files\TVPaint Developpement\TVPaint Animation 11.7.4 Pro (64bits)\plugins`, changes need admin permissions) and from `plugins` in the active user profile (e.g. `%APPDATA%\tvp animation 11 pro\default\plugins`, the profile is set in `system.ini` next to it). Tested with TVPaint 11.7.4. A plugin in both folders is loaded twice, also with the same filename. For 64-bit TVPaint the launch:
+
+- Keeps using the plugin in the installation folder while it's up to date, and removes it from the user profile.
+- Copies the plugin to the user profile when it's missing or outdated in the installation folder, which doesn't need admin permissions. The outdated plugin is removed from the installation folder, which asks for admin permissions once.
+- Copies the plugin to the installation folder, asking for admin permissions, before TVPaint created the user profile on its first start.
+
+32-bit TVPaint always uses the installation folder, it is not known if it shares the user profile with 64-bit TVPaint.
+
 On Linux, the library links to the glibc of the build machine and doesn't run on systems with older glibc. Build it in a Rocky Linux 8 container (glibc 2.28), so it runs on Rocky 8+ and Ubuntu 20.04+:
 
 ```shell
