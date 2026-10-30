@@ -2,6 +2,16 @@ name: 🚀 Release Trigger
 
 on:
   workflow_dispatch:
+    inputs:
+      draft:
+        type: boolean
+        description: "Create Release Draft"
+        required: false
+        default: false
+      release_overwrite:
+        type: string
+        description: "Set Version Release Tag"
+        required: false
 
 jobs:
   call-release-trigger:
