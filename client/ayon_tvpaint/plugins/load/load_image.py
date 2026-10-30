@@ -1,6 +1,6 @@
 from ayon_core.lib.attribute_definitions import BoolDef
 from ayon_tvpaint.api import plugin
-from ayon_tvpaint.api.lib import execute_george_through_file
+from ayon_tvpaint.api.lib import import_sequence
 
 
 class ImportImage(plugin.Loader):
@@ -15,13 +15,6 @@ class ImportImage(plugin.Loader):
     order = 1
     icon = "image"
     color = "white"
-
-    import_script = (
-        "filepath = \"{}\"\n"
-        "layer_name = \"{}\"\n"
-        "tv_loadsequence filepath {}PARSE layer_id\n"
-        "tv_layerrename layer_id layer_name"
-    )
 
     defaults = {
         "stretch": True,
@@ -57,18 +50,6 @@ class ImportImage(plugin.Loader):
         timestretch = options.get("timestretch", self.defaults["timestretch"])
         preload = options.get("preload", self.defaults["preload"])
 
-        load_options = []
-        if stretch:
-            load_options.append("\"STRETCH\"")
-        if timestretch:
-            load_options.append("\"TIMESTRETCH\"")
-        if preload:
-            load_options.append("\"PRELOAD\"")
-
-        load_options_str = ""
-        for load_option in load_options:
-            load_options_str += (load_option + " ")
-
         # Prepare layer name
         folder_name = context["folder"]["name"]
         version_name = context["version"]["name"]
@@ -77,12 +58,10 @@ class ImportImage(plugin.Loader):
             name,
             version_name
         )
-        # Fill import script with filename and layer name
-        # - filename mus not contain backwards slashes
-        path = self.filepath_from_context(context).replace("\\", "/")
-        george_script = self.import_script.format(
-            path,
+        import_sequence(
+            self.filepath_from_context(context),
             layer_name,
-            load_options_str
+            stretch=stretch,
+            timestretch=timestretch,
+            preload=preload,
         )
-        return execute_george_through_file(george_script)

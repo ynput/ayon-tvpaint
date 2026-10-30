@@ -1,0 +1,683 @@
+//! AYON plugin for TVPaint.
+//!
+//! The plugin runs a JSON-RPC 2.0 websocket server, AYON python process
+//! connects to it as a client. See 'README.md' for the protocol.
+//!
+//! All 'PI_*' functions are called by TVPaint from its main thread.
+
+// Crate name gives the expected "AYONPlugin" library file name.
+#![allow(non_snake_case)]
+
+mod encoding;
+mod sdk;
+mod server;
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ffi::{c_char, c_int, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
+
+use serde_json::{json, Value};
+
+use sdk::{Filter, IntPtr, PIFilter};
+use server::{Request, RpcError, Server, INTERNAL_ERROR, INVALID_PARAMS, METHOD_NOT_FOUND};
+
+/// Subfolder of AYON local directory where server files are stored.
+const SERVERS_SUBDIR: &str = "tvpaint_servers";
+/// Optional identifier of the launch, stored to the server file. It is
+/// set when TVPaint is launched by AYON.
+const LAUNCH_ID_ENV: &str = "AYON_TVPAINT_LAUNCH_ID";
+const MENU_LABEL_ENV: &str = "AYON_MENU_LABEL";
+
+const DEFAULT_MENU_TITLE: &str = "AYON Tools";
+const MENU_WIDTH: i32 = 185;
+const MENU_ROW_HEIGHT: i32 = 20;
+const MENU_HEIGHT_OFFSET: i32 = 5;
+const MENU_X_POS: i32 = 9;
+const MENU_Y_POS: i32 = 5;
+
+struct MenuItem {
+    label: String,
+    help: String,
+    callback: String,
+}
+
+struct Menu {
+    title: String,
+    items: Vec<MenuItem>,
+}
+
+#[derive(Default)]
+struct State {
+    /// Menu requester, 0 when closed.
+    menu_req: IntPtr,
+    /// Hidden requester used to receive ticks.
+    tick_req: IntPtr,
+    menu: Option<Menu>,
+    /// Menu was changed and requester must be rebuilt.
+    menu_changed: bool,
+    /// Callback names of menu buttons by button id.
+    buttons: HashMap<i32, String>,
+    server: Option<Server>,
+    /// Requests are being processed, avoid nested processing when
+    /// a george script makes TVPaint send ticks.
+    processing: bool,
+}
+
+thread_local! {
+    static STATE: RefCell<State> = RefCell::new(State::default());
+}
+
+/// Run callback with plugin state.
+///
+/// The state is never borrowed while TVPaint functions are called as
+/// TVPaint may call 'PI_Msg' from inside of them.
+fn with_state<R>(callback: impl FnOnce(&mut State) -> R) -> R {
+    STATE.with(|state| callback(&mut state.borrow_mut()))
+}
+
+/// Never let a panic unwind into TVPaint.
+fn guard<R>(default: R, callback: impl FnOnce() -> R) -> R {
+    match catch_unwind(AssertUnwindSafe(callback)) {
+        Ok(result) => result,
+        Err(_) => {
+            eprintln!("AYON: Plugin panicked");
+            default
+        }
+    }
+}
+
+fn plugin_label() -> String {
+    match std::env::var(MENU_LABEL_ENV) {
+        Ok(label) if !label.is_empty() => label,
+        _ => "AYON".into(),
+    }
+}
+
+fn env_path(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Predefined directory where server files are stored.
+///
+/// Matches the default AYON launcher local directory, but does not depend
+/// on environment set by AYON so TVPaint launched outside of AYON uses
+/// the same location. Must match 'get_servers_dir' in
+/// 'ayon_tvpaint/api/communication_server.py'.
+fn servers_dir() -> Option<PathBuf> {
+    let local_dir = if cfg!(windows) {
+        env_path("LOCALAPPDATA")
+            .or_else(|| env_path("USERPROFILE").map(|home| home.join("AppData").join("Local")))?
+            .join("Ynput")
+            .join("AYON")
+    } else if cfg!(target_os = "macos") {
+        env_path("HOME")?
+            .join("Library")
+            .join("Application Support")
+            .join("AYON")
+    } else {
+        env_path("XDG_DATA_HOME")
+            .or_else(|| env_path("HOME").map(|home| home.join(".local").join("share")))?
+            .join("AYON")
+    };
+    Some(local_dir.join(SERVERS_SUBDIR))
+}
+
+fn start_server(filter: Filter) {
+    let Some(servers_dir) = servers_dir() else {
+        filter.warning("AYON: Can't determine directory for server file.");
+        return;
+    };
+    // TVPaint is single instance per executable, launcher compares it with
+    //   the executable it would launch
+    let executable = std::env::current_exe()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned());
+    let info = json!({
+        "pid": std::process::id(),
+        "executable": executable,
+        "launch_id": std::env::var(LAUNCH_ID_ENV).ok(),
+        "plugin_version": env!("CARGO_PKG_VERSION"),
+        "started": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0),
+    });
+    match Server::start(&servers_dir, info) {
+        Ok(server) => {
+            eprintln!("AYON: Websocket server listening on port {}", server.port());
+            with_state(|state| state.server = Some(server));
+        }
+        Err(error) => {
+            filter.warning(&format!("AYON: Failed to start server: {error}"));
+        }
+    }
+}
+
+// --- Menu ---
+
+fn parse_menu(params: &Value) -> Result<Menu, String> {
+    // Menu is the first positional argument
+    let menu = match params {
+        Value::Array(values) => values.first().unwrap_or(&Value::Null),
+        value => value,
+    };
+    let Value::Object(menu) = menu else {
+        return Err("Menu definition must be an object".into());
+    };
+    let title = menu
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or(DEFAULT_MENU_TITLE)
+        .to_string();
+    let mut items = Vec::new();
+    let raw_items = menu.get("menu_items").and_then(Value::as_array);
+    for item in raw_items.into_iter().flatten() {
+        let text = |key: &str| item.get(key).and_then(Value::as_str);
+        let (Some(label), Some(callback)) = (text("label"), text("callback")) else {
+            return Err("Each menu item must have 'label' and 'callback'".into());
+        };
+        items.push(MenuItem {
+            label: label.into(),
+            help: text("help").unwrap_or_default().into(),
+            callback: callback.into(),
+        });
+    }
+    Ok(Menu { title, items })
+}
+
+/// Recreate menu buttons from current menu definition.
+fn rebuild_menu(filter: Filter) {
+    struct Button {
+        id: i32,
+        label: String,
+        help: String,
+    }
+
+    let plan = with_state(|state| {
+        state.menu_changed = false;
+        let menu = state.menu.as_ref()?;
+        if state.menu_req == 0 {
+            return None;
+        }
+        let old_ids: Vec<i32> = state.buttons.keys().copied().collect();
+        state.buttons.clear();
+        let mut buttons = Vec::new();
+        for (index, item) in menu.items.iter().enumerate() {
+            let id = (index as i32 + 1) * 10;
+            state.buttons.insert(id, item.callback.clone());
+            buttons.push(Button {
+                id,
+                label: item.label.clone(),
+                help: item.help.clone(),
+            });
+        }
+        Some((state.menu_req, menu.title.clone(), old_ids, buttons))
+    });
+    let Some((req, title, old_ids, buttons)) = plan else {
+        return;
+    };
+
+    for id in old_ids {
+        filter.remove_button(req, id);
+    }
+    filter.set_req_title(req, &title);
+
+    // Keep requester position, resize it to fit all buttons
+    let info = filter.req_info(req);
+    let height = MENU_ROW_HEIGHT * buttons.len() as i32 + MENU_HEIGHT_OFFSET;
+    filter.resize_req(req, info.x, info.y, MENU_WIDTH, height);
+
+    let flags = unsafe { sdk::AYON_PIRBF_BUTTON_NORMAL | sdk::AYON_PIRBF_BUTTON_ACTION };
+    let button_width = MENU_WIDTH - 19;
+    let mut y_pos = MENU_Y_POS;
+    for button in buttons {
+        filter.add_button(req, MENU_X_POS, y_pos, button_width, button.id, flags, &button.label);
+        filter.set_button_info_text(req, button.id, &button.help);
+        y_pos += MENU_ROW_HEIGHT;
+    }
+}
+
+/// Open hidden requester receiving ticks, requests are processed on ticks.
+///
+/// The ticker is independent of the menu, so ticks are received also when
+/// the menu is closed.
+fn open_ticker(filter: Filter) {
+    if with_state(|state| state.tick_req) != 0 {
+        return;
+    }
+    let req = filter.open_req(150, 80, unsafe { sdk::AYON_PIRF_HIDDEN_REQ }, "AYONticker");
+    if req == 0 {
+        filter.warning("Can't Open Requester!");
+        return;
+    }
+    with_state(|state| state.tick_req = req);
+    // Hidden flag alone does not hide the requester in TVPaint 12 GUI
+    filter.hide_req(req);
+    filter.grab_ticks(req);
+}
+
+fn open_menu(filter: Filter) -> bool {
+    // Ticker might have been closed by TVPaint
+    open_ticker(filter);
+
+    let menu_req = with_state(|state| state.menu_req);
+    if menu_req != 0 {
+        filter.req_to_front(menu_req);
+        return true;
+    }
+
+    // Requester is empty, buttons are defined with 'define_menu' method
+    let req = unsafe {
+        filter.open_filter_req(
+            MENU_WIDTH,
+            MENU_ROW_HEIGHT,
+            sdk::AYON_PIRF_STANDARD_REQ | sdk::AYON_PIRF_COLLAPSABLE_REQ,
+            sdk::AYON_FILTERREQ_NO_TBAR,
+        )
+    };
+    if req == 0 {
+        filter.warning("Can't Open Requester!");
+        return false;
+    }
+    with_state(|state| {
+        state.menu_req = req;
+        // Buttons belonged to the previous requester
+        state.buttons.clear();
+    });
+    filter.set_req_title(req, DEFAULT_MENU_TITLE);
+    rebuild_menu(filter);
+    true
+}
+
+// --- Requests ---
+
+fn handle_request(filter: Filter, request: &Request) -> Result<Value, RpcError> {
+    match request.method.as_str() {
+        "execute_george" => execute_george(filter, &request.params),
+        "execute_george_batch" => execute_george_batch(filter, &request.params),
+        "get_layer_ids" => get_layer_ids(filter),
+        "get_group_count" => get_group_count(filter),
+        "define_menu" => {
+            let menu =
+                parse_menu(&request.params).map_err(|error| RpcError::new(INVALID_PARAMS, error))?;
+            with_state(|state| {
+                state.menu = Some(menu);
+                state.menu_changed = true;
+            });
+            rebuild_menu(filter);
+            Ok(json!(""))
+        }
+        method => Err(RpcError::new(
+            METHOD_NOT_FOUND,
+            format!("Method \"{method}\" not found"),
+        )),
+    }
+}
+
+/// Get positional argument or named argument from params.
+fn param<'a>(params: &'a Value, index: usize, name: &str) -> Option<&'a Value> {
+    match params {
+        Value::Array(values) => values.get(index),
+        Value::Object(values) => values.get(name),
+        _ => None,
+    }
+}
+
+/// Validate and convert george command for TVPaint.
+///
+/// TVPaint executes only the first line of the command, so multiline
+/// scripts are refused instead of silently skipping the other lines.
+fn prepare_command(command: &str) -> Result<CString, RpcError> {
+    let command = command.trim_end();
+    if command.contains(['\n', '\r']) {
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            format!(
+                "George command must be a single line, TVPaint ignores other lines: {command}"
+            ),
+        ));
+    }
+    encoding::to_tvpaint(command).map_err(|error| RpcError::new(INVALID_PARAMS, error))
+}
+
+/// Execute prepared george command and return its output.
+fn run_command(filter: Filter, command: &CString) -> String {
+    let (output, success) = filter.send_cmd(command);
+    if !success {
+        eprintln!("AYON: George command failed: {}", command.to_string_lossy());
+    }
+    // Output is returned even on failure, it may contain the error
+    encoding::to_utf8(&output)
+}
+
+fn execute_george(filter: Filter, params: &Value) -> Result<Value, RpcError> {
+    let Some(script) = param(params, 0, "script").and_then(Value::as_str) else {
+        return Err(RpcError::new(INVALID_PARAMS, "Expected george command string"));
+    };
+    let command = prepare_command(script)?;
+    Ok(Value::String(run_command(filter, &command)))
+}
+
+/// Execute george commands one after another and return their outputs.
+///
+/// All commands run during a single tick, so nothing (e.g. user changing
+/// current layer) happens between them. Nothing is executed if any
+/// command is invalid.
+fn execute_george_batch(filter: Filter, params: &Value) -> Result<Value, RpcError> {
+    let Some(commands) = param(params, 0, "commands").and_then(Value::as_array) else {
+        return Err(RpcError::new(INVALID_PARAMS, "Expected list of george commands"));
+    };
+    let commands = commands
+        .iter()
+        .map(|command| match command.as_str() {
+            Some(command) => prepare_command(command),
+            None => Err(RpcError::new(INVALID_PARAMS, "George command must be a string")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let outputs = commands
+        .iter()
+        .map(|command| Value::String(run_command(filter, command)))
+        .collect();
+    Ok(Value::Array(outputs))
+}
+
+/// Maximum number of layers 'get_layer_ids' looks for, protects from
+/// infinite loop if TVPaint changes output of 'tv_layergetid'.
+const MAX_LAYERS: usize = 100_000;
+
+/// Ids of all layers of current clip in their order.
+///
+/// George has no command to get number of layers, layers are listed with
+/// 'tv_layergetid' until it returns "none".
+fn get_layer_ids(filter: Filter) -> Result<Value, RpcError> {
+    let mut layer_ids = Vec::new();
+    for index in 0..MAX_LAYERS {
+        let command = prepare_command(&format!("tv_layergetid {index}"))?;
+        let output = run_command(filter, &command);
+        match output.trim().parse::<i64>() {
+            Ok(layer_id) => layer_ids.push(json!(layer_id)),
+            // "none" when there are no more layers
+            Err(_) => break,
+        }
+    }
+    Ok(Value::Array(layer_ids))
+}
+
+/// Maximum number of color groups 'get_group_count' looks for.
+const MAX_GROUPS: usize = 10_000;
+
+/// Parse output of 'tv_LayerColor getcolor' to color and name.
+///
+/// Output looks like '0 1 250 0 0 "A"', name can contain spaces.
+fn parse_group_color(output: &str) -> Option<(&str, &str)> {
+    let mut parts = output.trim().splitn(3, ' ');
+    // Skip clip id and group index
+    parts.next()?;
+    parts.next()?;
+    let rest = parts.next()?;
+    let name_start = rest.find('"')?;
+    Some((rest[..name_start].trim(), rest[name_start..].trim_matches('"')))
+}
+
+/// Number of color groups in current clip, without the default group 0.
+///
+/// TVPaint 11.7 has 26 groups, newer versions have more. George has no
+/// command to get the count, and 'tv_LayerColor getcolor' with an index
+/// out of range returns color of the default group 0 with empty name.
+fn get_group_count(filter: Filter) -> Result<Value, RpcError> {
+    let getcolor = |index: usize| -> Result<String, RpcError> {
+        let command = prepare_command(&format!("tv_LayerColor getcolor 0 {index}"))?;
+        Ok(run_command(filter, &command))
+    };
+    let default_output = getcolor(0)?;
+    let Some((default_color, _)) = parse_group_color(&default_output) else {
+        return Err(RpcError::new(
+            server::INTERNAL_ERROR,
+            format!("Unexpected output of 'tv_LayerColor getcolor': {default_output}"),
+        ));
+    };
+    let default_color = default_color.to_string();
+    for index in 1..MAX_GROUPS {
+        let output = getcolor(index)?;
+        match parse_group_color(&output) {
+            Some((color, name)) if !(name.is_empty() && color == default_color) => {}
+            _ => return Ok(json!(index - 1)),
+        }
+    }
+    Ok(json!(MAX_GROUPS - 1))
+}
+
+fn process_requests(filter: Filter) {
+    let taken = with_state(|state| {
+        if state.processing {
+            return None;
+        }
+        let server = state.server.as_ref()?;
+        let requests = server.take_requests();
+        if requests.is_empty() {
+            return None;
+        }
+        state.processing = true;
+        Some((server.responder(), requests))
+    });
+    let Some((responder, requests)) = taken else {
+        return;
+    };
+
+    for request in requests {
+        // Client would wait forever for the response, and 'processing'
+        //   would stay set, if the panic was caught only in 'PI_Msg'
+        let result = catch_unwind(AssertUnwindSafe(|| handle_request(filter, &request)))
+            .unwrap_or_else(|_| {
+                Err(RpcError::new(INTERNAL_ERROR, "Plugin panicked while handling request"))
+            });
+        responder.respond(&request, result);
+    }
+    with_state(|state| state.processing = false);
+}
+
+fn on_button_up(filter: Filter, button_id: i32) {
+    let target = with_state(|state| {
+        let callback = state.buttons.get(&button_id)?.clone();
+        Some((state.server.as_ref()?.responder(), callback))
+    });
+    if let Some((responder, callback)) = target {
+        // Notification, TVPaint must not wait for the client
+        responder.notify_all(&callback, json!([]));
+    }
+    filter.execute();
+}
+
+fn on_close(filter: Filter, req: IntPtr, closed_by_shutdown: IntPtr) {
+    let (is_menu, is_ticker) = with_state(|state| {
+        if state.menu_req == req {
+            state.menu_req = 0;
+            state.buttons.clear();
+            return (true, false);
+        }
+        if state.tick_req == req {
+            state.tick_req = 0;
+            return (false, true);
+        }
+        (false, false)
+    });
+    if is_menu {
+        // Flag is 1 when requester was closed by TVPaint shutdown,
+        //   then the menu is opened on next start.
+        filter.write_user_string(&filter.name(), "Open", &closed_by_shutdown.to_string());
+    } else if is_ticker && closed_by_shutdown == 0 {
+        // Requests would never be processed without ticks
+        open_ticker(filter);
+    }
+}
+
+// --- Plugin functions ---
+
+/// # Safety
+/// Called by TVPaint with valid 'PIFilter'.
+#[no_mangle]
+pub unsafe extern "system" fn PI_About(filter: *mut PIFilter) {
+    guard((), || {
+        let filter = Filter(filter);
+        let (version, revision) = filter.version();
+        filter.warning(&format!("{} {version},{revision}", filter.name()));
+    })
+}
+
+/// Called at TVPaint startup when the plugin is loaded.
+///
+/// # Safety
+/// Called by TVPaint with valid 'PIFilter'.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Open(filter: *mut PIFilter) -> c_int {
+    guard(0, || {
+        let filter = Filter(filter);
+        let version = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap_or(0);
+        let revision = env!("CARGO_PKG_VERSION_MINOR").parse().unwrap_or(0);
+        filter.set_info(&plugin_label(), version, revision);
+
+        // Re-open the menu if it was open when TVPaint was closed, open it
+        //   by default when launched by AYON
+        let launched_by_ayon = std::env::var_os(LAUNCH_ID_ENV).is_some();
+        let default_open = if launched_by_ayon { "1" } else { "0" };
+        let open = filter.read_user_string(&filter.name(), "Open", default_open);
+        if open.trim().parse::<i32>().unwrap_or(0) != 0 {
+            open_menu(filter);
+        }
+
+        open_ticker(filter);
+        start_server(filter);
+        1
+    })
+}
+
+/// Called at TVPaint shutdown.
+///
+/// # Safety
+/// Called by TVPaint with valid 'PIFilter'.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Close(filter: *mut PIFilter) {
+    guard((), || {
+        let filter = Filter(filter);
+        // Reset ticker first, so closing it doesn't reopen it
+        let (menu_req, tick_req) =
+            with_state(|state| (state.menu_req, std::mem::take(&mut state.tick_req)));
+        if menu_req != 0 {
+            filter.close_req(menu_req);
+        }
+        if tick_req != 0 {
+            filter.close_req(tick_req);
+        }
+        // Dropping the server stops it and removes the server file
+        let server = with_state(|state| state.server.take());
+        drop(server);
+    })
+}
+
+/// Called when user opens the plugin from TVPaint.
+///
+/// # Safety
+/// Called by TVPaint with valid 'PIFilter'.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Parameters(filter: *mut PIFilter, arg: *mut c_char) -> c_int {
+    guard(0, || {
+        if !arg.is_null() {
+            return 1;
+        }
+        open_menu(Filter(filter)) as c_int
+    })
+}
+
+/// Requester events.
+///
+/// # Safety
+/// Called by TVPaint with valid 'PIFilter' and arguments array.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Msg(
+    filter: *mut PIFilter,
+    event: IntPtr,
+    req: IntPtr,
+    args: *mut IntPtr,
+) -> c_int {
+    guard(1, || {
+        let filter = Filter(filter);
+        // Number of arguments depends on event, read only documented ones
+        let arg = |index: usize| -> IntPtr {
+            if args.is_null() {
+                0
+            } else {
+                *args.add(index)
+            }
+        };
+
+        if event == sdk::AYON_PICBREQ_BUTTON_UP {
+            on_button_up(filter, arg(0) as i32);
+        } else if event == sdk::AYON_PICBREQ_CLOSE {
+            on_close(filter, req, arg(4));
+        } else if event == sdk::AYON_PICBREQ_OPEN {
+            if with_state(|state| state.menu_changed) {
+                rebuild_menu(filter);
+            }
+        } else if event == sdk::AYON_PICBREQ_TICKS {
+            if with_state(|state| state.menu_changed) {
+                rebuild_menu(filter);
+            }
+            process_requests(filter);
+        }
+        1
+    })
+}
+
+// Plugin is not an image filter, the functions below do nothing.
+
+/// # Safety
+/// Called by TVPaint.
+#[no_mangle]
+pub unsafe extern "system" fn PI_SequenceStart(_filter: *mut PIFilter, _size: c_int) -> c_int {
+    1
+}
+
+/// # Safety
+/// Called by TVPaint.
+#[no_mangle]
+pub unsafe extern "system" fn PI_SequenceFinish(_filter: *mut PIFilter) {}
+
+/// # Safety
+/// Called by TVPaint.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Start(_filter: *mut PIFilter, _pos: f64, _size: f64) -> c_int {
+    1
+}
+
+/// # Safety
+/// Called by TVPaint.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Finish(_filter: *mut PIFilter) {}
+
+/// # Safety
+/// Called by TVPaint.
+#[no_mangle]
+pub unsafe extern "system" fn PI_Work(_filter: *mut PIFilter) -> c_int {
+    1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_group_color;
+
+    #[test]
+    fn group_color_is_parsed() {
+        assert_eq!(parse_group_color(r#"0 1 250 0 0 "A""#), Some(("250 0 0", "A")));
+        assert_eq!(
+            parse_group_color(r#"1046 3 10 20 30 "render layer""#),
+            Some(("10 20 30", "render layer"))
+        );
+        // Index out of range in TVPaint 11.7
+        assert_eq!(parse_group_color(r#"0 27 72 72 72 """#), Some(("72 72 72", "")));
+        assert_eq!(parse_group_color("error"), None);
+    }
+}

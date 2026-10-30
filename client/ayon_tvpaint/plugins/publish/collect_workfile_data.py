@@ -1,14 +1,13 @@
 import os
 import json
-import tempfile
 
 import pyblish.api
 
 from ayon_core.pipeline import PublishError
 from ayon_tvpaint.api.lib import (
     execute_george,
-    execute_george_through_file,
     get_layers_data,
+    get_scene_bg_color,
     get_groups_data,
 )
 from ayon_tvpaint.api.pipeline import (
@@ -204,31 +203,4 @@ class CollectWorkfileData(pyblish.api.ContextPlugin):
         Is important for review exporting where scene bg color is used as
         background.
         """
-        output_file = tempfile.NamedTemporaryFile(
-            mode="w", prefix="a_tvp_", suffix=".txt", delete=False
-        )
-        output_file.close()
-        output_filepath = output_file.name.replace("\\", "/")
-        george_script_lines = [
-            # Variable containing full path to output file
-            "output_path = \"{}\"".format(output_filepath),
-            "tv_background",
-            "bg_color = result",
-            # Write data to output file
-            (
-                "tv_writetextfile"
-                " \"strict\" \"append\" '\"'output_path'\"' bg_color"
-            )
-        ]
-
-        george_script = "\n".join(george_script_lines)
-        execute_george_through_file(george_script)
-
-        with open(output_filepath, "r") as stream:
-            data = stream.read()
-
-        os.remove(output_filepath)
-        data = data.strip()
-        if not data:
-            return None
-        return data.split(" ")
+        return get_scene_bg_color()

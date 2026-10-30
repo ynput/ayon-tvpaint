@@ -1,6 +1,7 @@
 import os
 import re
 import glob
+import platform
 import configparser
 
 from ayon_applications import PreLaunchHook, LaunchTypes
@@ -17,7 +18,7 @@ class TvpaintGeorgeWritePopup(PreLaunchHook):
 
     app_groups = {"tvpaint"}
     launch_types = {LaunchTypes.local}
-    platforms = {"windows"}
+    platforms = {"windows", "linux"}
 
     def execute(self):
         # NOTE config.ini does contain special byte characters that's why
@@ -61,17 +62,21 @@ class TvpaintGeorgeWritePopup(PreLaunchHook):
             str: Path to 'config.ini' of a TVPaint configuration.
         """
 
-        appdata = os.environ.get("APPDATA")
-        if not appdata:
+        if platform.system().lower() == "windows":
+            config_root = os.environ.get("APPDATA")
+        else:
+            config_root = os.path.join(os.path.expanduser("~"), ".tvp")
+        if not config_root:
             return
 
-        for base in glob.glob(os.path.join(appdata, "tvp animation *")):
+        for base in glob.glob(os.path.join(config_root, "tvp animation *")):
             profile = "default"
             system_ini = os.path.join(base, "system.ini")
             if os.path.exists(system_ini):
                 parser = configparser.ConfigParser()
                 try:
-                    parser.read(system_ini)
+                    # File starts with BOM on Linux
+                    parser.read(system_ini, encoding="utf-8-sig")
                     profile = parser.get(
                         "system", "config", fallback=profile
                     )
