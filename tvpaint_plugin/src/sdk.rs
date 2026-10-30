@@ -64,6 +64,7 @@ extern "C" {
     fn TVCloseReq(filter: *mut PIFilter, req: IntPtr);
     fn TVSetReqTitle(filter: *mut PIFilter, req: IntPtr, title: *const c_char) -> c_int;
     fn TVReqToFront(filter: *mut PIFilter, req: IntPtr) -> c_int;
+    fn TVDisplayReq(filter: *mut PIFilter, req: IntPtr, display: c_int) -> c_int;
     fn TVInfoReq(
         filter: *mut PIFilter,
         req: IntPtr,
@@ -193,6 +194,11 @@ impl Filter {
 
     pub fn req_to_front(&self, req: IntPtr) {
         unsafe { TVReqToFront(self.0, req) };
+    }
+
+    pub fn hide_req(&self, req: IntPtr) {
+        // 0 hides the requester
+        unsafe { TVDisplayReq(self.0, req, 0) };
     }
 
     pub fn req_info(&self, req: IntPtr) -> ReqInfo {

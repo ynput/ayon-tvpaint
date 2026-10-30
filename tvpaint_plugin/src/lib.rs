@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use sdk::{Filter, IntPtr, PIFilter};
-use server::{Request, RpcError, Server, INVALID_PARAMS, METHOD_NOT_FOUND};
+use server::{Request, RpcError, Server, INTERNAL_ERROR, INVALID_PARAMS, METHOD_NOT_FOUND};
 
 /// Subfolder of AYON local directory where server files are stored.
 const SERVERS_SUBDIR: &str = "tvpaint_servers";
@@ -241,7 +241,29 @@ fn rebuild_menu(filter: Filter) {
     }
 }
 
+/// Open hidden requester receiving ticks, requests are processed on ticks.
+///
+/// The ticker is independent of the menu, so ticks are received also when
+/// the menu is closed.
+fn open_ticker(filter: Filter) {
+    if with_state(|state| state.tick_req) != 0 {
+        return;
+    }
+    let req = filter.open_req(150, 80, unsafe { sdk::AYON_PIRF_HIDDEN_REQ }, "AYONticker");
+    if req == 0 {
+        filter.warning("Can't Open Requester!");
+        return;
+    }
+    with_state(|state| state.tick_req = req);
+    // Hidden flag alone does not hide the requester in TVPaint 12 GUI
+    filter.hide_req(req);
+    filter.grab_ticks(req);
+}
+
 fn open_menu(filter: Filter) -> bool {
+    // Ticker might have been closed by TVPaint
+    open_ticker(filter);
+
     let menu_req = with_state(|state| state.menu_req);
     if menu_req != 0 {
         filter.req_to_front(menu_req);
@@ -447,7 +469,12 @@ fn process_requests(filter: Filter) {
     };
 
     for request in requests {
-        let result = handle_request(filter, &request);
+        // Client would wait forever for the response, and 'processing'
+        //   would stay set, if the panic was caught only in 'PI_Msg'
+        let result = catch_unwind(AssertUnwindSafe(|| handle_request(filter, &request)))
+            .unwrap_or_else(|_| {
+                Err(RpcError::new(INTERNAL_ERROR, "Plugin panicked while handling request"))
+            });
         responder.respond(&request, result);
     }
     with_state(|state| state.processing = false);
@@ -466,21 +493,25 @@ fn on_button_up(filter: Filter, button_id: i32) {
 }
 
 fn on_close(filter: Filter, req: IntPtr, closed_by_shutdown: IntPtr) {
-    let is_menu = with_state(|state| {
+    let (is_menu, is_ticker) = with_state(|state| {
         if state.menu_req == req {
             state.menu_req = 0;
             state.buttons.clear();
-            return true;
+            return (true, false);
         }
         if state.tick_req == req {
             state.tick_req = 0;
+            return (false, true);
         }
-        false
+        (false, false)
     });
     if is_menu {
         // Flag is 1 when requester was closed by TVPaint shutdown,
         //   then the menu is opened on next start.
         filter.write_user_string(&filter.name(), "Open", &closed_by_shutdown.to_string());
+    } else if is_ticker && closed_by_shutdown == 0 {
+        // Requests would never be processed without ticks
+        open_ticker(filter);
     }
 }
 
@@ -518,13 +549,7 @@ pub unsafe extern "system" fn PI_Open(filter: *mut PIFilter) -> c_int {
             open_menu(filter);
         }
 
-        let req = filter.open_req(150, 80, sdk::AYON_PIRF_HIDDEN_REQ, "AYONticker");
-        if req == 0 {
-            filter.warning("Can't Open Requester!");
-        } else {
-            with_state(|state| state.tick_req = req);
-            filter.grab_ticks(req);
-        }
+        open_ticker(filter);
         start_server(filter);
         1
     })
@@ -538,7 +563,9 @@ pub unsafe extern "system" fn PI_Open(filter: *mut PIFilter) -> c_int {
 pub unsafe extern "system" fn PI_Close(filter: *mut PIFilter) {
     guard((), || {
         let filter = Filter(filter);
-        let (menu_req, tick_req) = with_state(|state| (state.menu_req, state.tick_req));
+        // Reset ticker first, so closing it doesn't reopen it
+        let (menu_req, tick_req) =
+            with_state(|state| (state.menu_req, std::mem::take(&mut state.tick_req)));
         if menu_req != 0 {
             filter.close_req(menu_req);
         }
