@@ -25,7 +25,12 @@ extern "C" {
     pub static AYON_FILTERREQ_NO_TBAR: IntPtr;
     pub static AYON_PIRBF_BUTTON_NORMAL: IntPtr;
     pub static AYON_PIRBF_BUTTON_ACTION: IntPtr;
+    pub static AYON_PIRBF_BUTTON_FLAT: IntPtr;
+    pub static AYON_PIRF_LOCK_REQ: IntPtr;
+    pub static AYON_PIRF_NO_CLOSE_REQ: IntPtr;
+    pub static AYON_PIRF_CENTER_REQ: IntPtr;
     pub static AYON_PITICKS_FLAG_ON: c_int;
+    pub static AYON_PITICKS_FLAG_NO_WAIT: c_int;
 
     pub static AYON_PICBREQ_OPEN: IntPtr;
     pub static AYON_PICBREQ_CLOSE: IntPtr;
@@ -213,6 +218,12 @@ impl Filter {
 
     pub fn grab_ticks(&self, req: IntPtr) {
         unsafe { TVGrabTicks(self.0, req, AYON_PITICKS_FLAG_ON) };
+    }
+
+    /// Receive ticks also when nothing happens, only for requesters
+    /// opened with 'PIRF_LOCK_REQ'.
+    pub fn grab_ticks_no_wait(&self, req: IntPtr) {
+        unsafe { TVGrabTicks(self.0, req, AYON_PITICKS_FLAG_NO_WAIT) };
     }
 
     #[allow(clippy::too_many_arguments)]

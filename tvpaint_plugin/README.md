@@ -45,13 +45,26 @@ Methods handled by the plugin:
 | `get_layer_ids` | none | Ids of all layers in the current clip (`tv_LayerGetID` until `none`). |
 | `get_group_count` | none | Number of color groups without the default group 0 (26 in TVPaint 11.7, more in newer versions). |
 | `define_menu` | `[{"title": str, "menu_items": [{"label", "help", "callback"}]}]` | `""` |
+| `lock_ui` | `{"message": str, "title": str}` or `[message, title]`, both optional | `null`. Blocks user interaction, see [UI lock](#ui-lock). Fails with `-32004` if another connection locked the UI. |
+| `unlock_ui` | none | `null`. Releases the lock of this connection. Fails with `-32004` if another connection locked the UI. |
 | `get_server_info` | none | Content of the server file plus `host_client` (data of the registered host client, or `null`). |
 | `register_host` | `[{...}]` | `null`. Registers the connection as host client. Fails with `-32002` if another connection is registered. |
 | `send_to_host` | `{"method": str, "params": ...}` | Response of the host client. Fails with `-32001` if no host client is registered, or `-32003` if it disconnects before responding. |
 
 When a menu button is clicked, the plugin sends a notification named after the button's `callback`, with empty `params`. The plugin does not wait for a response, so TVPaint never blocks on the client.
 
-`execute_george`, `execute_george_batch`, `get_layer_ids`, `get_group_count` and `define_menu` are queued and handled on TVPaint's main thread (on requester ticks), because SDK functions can't be called from other threads. The other methods don't touch TVPaint. They are handled in the server thread and work even while TVPaint is busy.
+`execute_george`, `execute_george_batch`, `get_layer_ids`, `get_group_count`, `define_menu`, `lock_ui` and `unlock_ui` are queued and handled on TVPaint's main thread (on requester ticks), because SDK functions can't be called from other threads. The other methods don't touch TVPaint. They are handled in the server thread and work even while TVPaint is busy.
+
+## UI lock
+
+`lock_ui` blocks user interaction with TVPaint, e.g. during publishing. The plugin opens a requester with `PIRF_LOCK_REQ`, which TVPaint shows as a modal window with the message and dims the rest of the UI. The requester has no close button. Each line of the message is shown as a separate row. The default title is the plugin label, the default message is `AYON is working, please wait...`.
+
+- Requests are handled while the UI is locked, george commands work as usual.
+- Calling `lock_ui` again from the same connection changes the message. The title is kept if it isn't passed.
+- The lock belongs to the connection that created it. It is released by `unlock_ui` or when the connection closes, so a crashed client doesn't leave TVPaint locked. A client that hangs with its connection open keeps the lock.
+- The UI is locked on the next tick after the request, the response is sent before that.
+
+`TVOpenReq` returns `0` for lock requesters, so the plugin recognizes the requester by the first message TVPaint sends for an unknown requester, and grabs its ticks with `PITICKS_FLAG_NO_WAIT` to keep handling requests while the modal loop runs. These ticks come without any pause, so on each of them the plugin waits up to 10 ms for a request, otherwise TVPaint would use a whole CPU core. Tested with TVPaint 11.7.4 on Windows.
 
 ## George commands
 
