@@ -363,24 +363,21 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             }
 
         # Render layers
-        filepaths_by_layer_id = {}
-        for layer_id, render_data in extraction_data_by_layer_id.items():
-            layer = layers_by_id[layer_id]
-            transparency = 1.0
-            if not ignore_layer_opacity:
-                # The only way how to get current transparency is to set new
-                #   value which returns previous value.
-                transparency_int = int(execute_george("tv_layerdensity 100"))
-                execute_george(f"tv_layerdensity {transparency_int}")
-                transparency = float(transparency_int) / 100.0
-
-            # Make sure transparent images are transparent
-            if layer_id in transparent_layer_ids:
-                transparency = 0.0
-
-            filepaths_by_layer_id[layer_id] = self._render_layer(
-                render_data, layer, output_dir, transparency
+        # - make sure images are saved with alpha channel which is required
+        #   for compositing, alpha save mode is global TVPaint setting
+        #   and is set back to its original value after rendering
+        alpha_save_mode = self._set_alpha_save_mode("NoPreMultiply")
+        try:
+            filepaths_by_layer_id = self._render_layers(
+                extraction_data_by_layer_id,
+                layers_by_id,
+                transparent_layer_ids,
+                output_dir,
+                ignore_layer_opacity,
             )
+        finally:
+            if alpha_save_mode:
+                self._set_alpha_save_mode(alpha_save_mode)
 
         # Prepare final filepaths where compositing should store result
         output_filepaths_by_frame = {}
@@ -437,6 +434,74 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             elif len(self.review_bg) == 3:
                 red, green, blue = self.review_bg
         return (red, green, blue)
+
+    def _set_alpha_save_mode(self, alpha_save_mode: str) -> str | None:
+        """Set alpha save mode in TVPaint.
+
+        Getting the current mode with 'tv_AlphaSaveMode' without arguments
+        is not reliable, it returns the mode that was set before the last
+        change. Setting the mode returns the previous mode which is correct.
+
+        Args:
+            alpha_save_mode (str): Alpha save mode e.g. 'NoPreMultiply'.
+
+        Returns:
+            Optional[str]: Previous alpha save mode.
+
+        """
+        previous_mode = (
+            execute_george(f"tv_AlphaSaveMode {alpha_save_mode}") or ""
+        ).strip()
+        # Expect single keyword (e.g. 'NoPreMultiply')
+        if not previous_mode or " " in previous_mode:
+            self.log.debug(
+                f"Unexpected alpha save mode output: '{previous_mode}'."
+            )
+            return None
+        return previous_mode
+
+    def _render_layers(
+        self,
+        extraction_data_by_layer_id: dict[int, dict[str, Any]],
+        layers_by_id: dict[int, dict[str, Any]],
+        transparent_layer_ids: set[int],
+        output_dir: str,
+        ignore_layer_opacity: bool,
+    ) -> dict[int, dict[int, str | None]]:
+        filepaths_by_layer_id = {}
+        for layer_id, render_data in extraction_data_by_layer_id.items():
+            layer = layers_by_id[layer_id]
+            # Layer is rendered with 100% density and opacity is applied
+            #   to rendered images afterwards, unless it should be ignored
+            # - the only way how to get current density is to set new
+            #   value which returns previous value
+            # - 'tv_layerdensity' works on current layer, so the layer
+            #   must be set as current first
+            _, density_output = execute_george_batch([
+                f"tv_layerset {layer_id}",
+                "tv_layerdensity 100",
+            ])
+            layer_density = int(density_output)
+
+            transparency = 1.0
+            if not ignore_layer_opacity:
+                transparency = float(layer_density) / 100.0
+
+            # Make sure transparent images are transparent
+            if layer_id in transparent_layer_ids:
+                transparency = 0.0
+
+            try:
+                filepaths_by_layer_id[layer_id] = self._render_layer(
+                    render_data, layer, output_dir, transparency
+                )
+            finally:
+                # Set density back to original value
+                execute_george_batch([
+                    f"tv_layerset {layer_id}",
+                    f"tv_layerdensity {layer_density}",
+                ])
+        return filepaths_by_layer_id
 
     def _render_layer(
         self,
