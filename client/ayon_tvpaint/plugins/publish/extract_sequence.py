@@ -370,7 +370,13 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             if not ignore_layer_opacity:
                 # The only way how to get current transparency is to set new
                 #   value which returns previous value.
-                transparency_int = int(execute_george("tv_layerdensity 100"))
+                # - 'tv_layerdensity' works on current layer, so the layer
+                #   must be set as current first
+                _, density_output = execute_george_batch([
+                    f"tv_layerset {layer_id}",
+                    "tv_layerdensity 100",
+                ])
+                transparency_int = int(density_output)
                 execute_george(f"tv_layerdensity {transparency_int}")
                 transparency = float(transparency_int) / 100.0
 
