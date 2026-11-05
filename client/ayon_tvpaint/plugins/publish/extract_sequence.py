@@ -363,24 +363,22 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             }
 
         # Render layers
-        filepaths_by_layer_id = {}
-        for layer_id, render_data in extraction_data_by_layer_id.items():
-            layer = layers_by_id[layer_id]
-            transparency = 1.0
-            if not ignore_layer_opacity:
-                # The only way how to get current transparency is to set new
-                #   value which returns previous value.
-                transparency_int = int(execute_george("tv_layerdensity 100"))
-                execute_george(f"tv_layerdensity {transparency_int}")
-                transparency = float(transparency_int) / 100.0
-
-            # Make sure transparent images are transparent
-            if layer_id in transparent_layer_ids:
-                transparency = 0.0
-
-            filepaths_by_layer_id[layer_id] = self._render_layer(
-                render_data, layer, output_dir, transparency
+        # - make sure images are saved with alpha channel which is required
+        #   for compositing, alpha save mode is global TVPaint setting
+        #   and is set back to its original value after rendering
+        alpha_save_mode = self._get_alpha_save_mode()
+        execute_george("tv_AlphaSaveMode NoPreMultiply")
+        try:
+            filepaths_by_layer_id = self._render_layers(
+                extraction_data_by_layer_id,
+                layers_by_id,
+                transparent_layer_ids,
+                output_dir,
+                ignore_layer_opacity,
             )
+        finally:
+            if alpha_save_mode:
+                execute_george(f"tv_AlphaSaveMode {alpha_save_mode}")
 
         # Prepare final filepaths where compositing should store result
         output_filepaths_by_frame = {}
@@ -438,6 +436,45 @@ class ExtractSequence(pyblish.api.InstancePlugin):
                 red, green, blue = self.review_bg
         return (red, green, blue)
 
+    def _get_alpha_save_mode(self) -> str | None:
+        """Current alpha save mode in TVPaint."""
+        alpha_save_mode = (execute_george("tv_AlphaSaveMode") or "").strip()
+        # Expect single keyword (e.g. 'NoPreMultiply')
+        if not alpha_save_mode or " " in alpha_save_mode:
+            self.log.debug(
+                f"Unexpected alpha save mode output: '{alpha_save_mode}'."
+            )
+            return None
+        return alpha_save_mode
+
+    def _render_layers(
+        self,
+        extraction_data_by_layer_id: dict[int, dict[str, Any]],
+        layers_by_id: dict[int, dict[str, Any]],
+        transparent_layer_ids: set[int],
+        output_dir: str,
+        ignore_layer_opacity: bool,
+    ) -> dict[int, dict[int, str | None]]:
+        filepaths_by_layer_id = {}
+        for layer_id, render_data in extraction_data_by_layer_id.items():
+            layer = layers_by_id[layer_id]
+            transparency = 1.0
+            if not ignore_layer_opacity:
+                # The only way how to get current transparency is to set new
+                #   value which returns previous value.
+                transparency_int = int(execute_george("tv_layerdensity 100"))
+                execute_george(f"tv_layerdensity {transparency_int}")
+                transparency = float(transparency_int) / 100.0
+
+            # Make sure transparent images are transparent
+            if layer_id in transparent_layer_ids:
+                transparency = 0.0
+
+            filepaths_by_layer_id[layer_id] = self._render_layer(
+                render_data, layer, output_dir, transparency
+            )
+        return filepaths_by_layer_id
+
     def _render_layer(
         self,
         render_data: dict[str, Any],
@@ -483,6 +520,17 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         ))
         # Let TVPaint render layer's image
         execute_george_batch(george_script_lines)
+
+        # Images without alpha channel can't be composited correctly
+        sample_filepath = next(iter(rendered_filepaths), None)
+        if sample_filepath:
+            with Image.open(sample_filepath) as img:
+                mode = img.mode
+            if mode != "RGBA":
+                self.log.warning(
+                    f"Layer '{layer['name']}' was rendered without alpha"
+                    f" channel (mode '{mode}'), composite may be wrong."
+                )
 
         # Apply layer opacity
         if transparency != 1.0:
