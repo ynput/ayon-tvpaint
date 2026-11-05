@@ -147,7 +147,7 @@ TVPaint on macOS stores image pixels in `.tvpp` files as ARGB, on Windows and Li
 
 ## CI
 
-`.github/workflows/tvpaint_plugin_build.yml` runs when a pull request changes `tvpaint_plugin/`. It uses the public SDK pinned to a commit, runs clippy, `cargo fmt --check` (not blocking yet) and tests, and builds Windows x64, Linux (Rocky Linux 8) and macOS universal plugins. They are uploaded as the `tvpaint-plugin` workflow artifact, laid out like `client/ayon_tvpaint/tvpaint_plugin`. The 32-bit Windows plugin is not built in CI.
+`.github/workflows/tvpaint_plugin_build.yml` runs when a pull request changes code in `tvpaint_plugin/` (not Markdown files), and on manual runs. It uses the public SDK pinned to a commit, runs clippy, `cargo fmt --check` (not blocking yet) and tests, and builds Windows x64, Linux (Rocky Linux 8) and macOS universal plugins. They are uploaded as the `tvpaint-plugin` workflow artifact, laid out like `client/ayon_tvpaint/tvpaint_plugin`. The 32-bit Windows plugin is not built in CI.
 
 To update the committed plugins, run the workflow manually (Actions > TVPaint Plugin Build > Run workflow) on your branch. It commits the Windows x64, Linux and macOS plugins to that branch when they changed. `develop` is protected, so run it on a pull request branch. Build and commit the 32-bit Windows plugin manually.
 

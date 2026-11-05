@@ -1,16 +1,13 @@
 name: 🔨 TVPaint Plugin Build
 
+# Build only when plugin code changes. Pushes to develop are not built,
+#   the code was already built in its pull request.
 on:
-  push:
-    branches: [ develop ]
-    paths:
-      - "tvpaint_plugin/**"
-      - ".github/workflows/tvpaint_plugin_build.yml"
   pull_request:
     branches: [ develop ]
     paths:
       - "tvpaint_plugin/**"
-      - ".github/workflows/tvpaint_plugin_build.yml"
+      - "!tvpaint_plugin/**/*.md"
   workflow_dispatch:
 
 concurrency:
