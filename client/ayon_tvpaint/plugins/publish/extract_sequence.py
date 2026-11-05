@@ -487,7 +487,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         # Apply layer opacity
         if transparency != 1.0:
             for filepath in rendered_filepaths:
-                img = Image.open(filepath)
+                img = Image.open(filepath).convert("RGBA")
                 r, g, b, a = img.split()
                 a = a.point(lambda i: i * transparency)
                 img = Image.merge("RGBA", (r, g, b, a))
