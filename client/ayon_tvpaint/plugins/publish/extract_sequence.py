@@ -366,8 +366,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         # - make sure images are saved with alpha channel which is required
         #   for compositing, alpha save mode is global TVPaint setting
         #   and is set back to its original value after rendering
-        alpha_save_mode = self._get_alpha_save_mode()
-        execute_george("tv_AlphaSaveMode NoPreMultiply")
+        alpha_save_mode = self._set_alpha_save_mode("NoPreMultiply")
         try:
             filepaths_by_layer_id = self._render_layers(
                 extraction_data_by_layer_id,
@@ -378,7 +377,7 @@ class ExtractSequence(pyblish.api.InstancePlugin):
             )
         finally:
             if alpha_save_mode:
-                execute_george(f"tv_AlphaSaveMode {alpha_save_mode}")
+                self._set_alpha_save_mode(alpha_save_mode)
 
         # Prepare final filepaths where compositing should store result
         output_filepaths_by_frame = {}
@@ -436,16 +435,30 @@ class ExtractSequence(pyblish.api.InstancePlugin):
                 red, green, blue = self.review_bg
         return (red, green, blue)
 
-    def _get_alpha_save_mode(self) -> str | None:
-        """Current alpha save mode in TVPaint."""
-        alpha_save_mode = (execute_george("tv_AlphaSaveMode") or "").strip()
+    def _set_alpha_save_mode(self, alpha_save_mode: str) -> str | None:
+        """Set alpha save mode in TVPaint.
+
+        Getting the current mode with 'tv_AlphaSaveMode' without arguments
+        is not reliable, it returns the mode that was set before the last
+        change. Setting the mode returns the previous mode which is correct.
+
+        Args:
+            alpha_save_mode (str): Alpha save mode e.g. 'NoPreMultiply'.
+
+        Returns:
+            Optional[str]: Previous alpha save mode.
+
+        """
+        previous_mode = (
+            execute_george(f"tv_AlphaSaveMode {alpha_save_mode}") or ""
+        ).strip()
         # Expect single keyword (e.g. 'NoPreMultiply')
-        if not alpha_save_mode or " " in alpha_save_mode:
+        if not previous_mode or " " in previous_mode:
             self.log.debug(
-                f"Unexpected alpha save mode output: '{alpha_save_mode}'."
+                f"Unexpected alpha save mode output: '{previous_mode}'."
             )
             return None
-        return alpha_save_mode
+        return previous_mode
 
     def _render_layers(
         self,
