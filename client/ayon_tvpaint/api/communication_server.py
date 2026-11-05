@@ -605,6 +605,7 @@ class QtTVPaintRpc:
         self.tools_helper = host_tools.HostToolsHelper()
 
         self.communication_obj = communication_obj
+        self._publisher_controller = None
 
     def register(self, rpc_client):
         for name, callback in (
@@ -674,8 +675,58 @@ class QtTVPaintRpc:
 
     def publish_tool(self):
         log.info("Triggering Publish tool")
-        item = MainThreadItem(self.tools_helper.show_publisher_tool)
+        item = MainThreadItem(self._show_publisher_tool)
         self._execute_in_main_thread(item, wait=False)
+
+    def _show_publisher_tool(self):
+        # Controller is used only when the publisher window is created
+        if self._publisher_controller is None:
+            self._publisher_controller = self._create_publisher_controller()
+        self.tools_helper.show_publisher_tool(
+            controller=self._publisher_controller
+        )
+
+    def _create_publisher_controller(self):
+        """Publisher controller locking TVPaint UI while publishing."""
+        from ayon_core.tools.publisher.control_qt import (
+            QtPublisherController,
+        )
+
+        controller = QtPublisherController()
+        controller.register_event_callback(
+            "publish.process.started", self._on_publish_started
+        )
+        controller.register_event_callback(
+            "publish.process.plugin.changed", self._on_publish_plugin_changed
+        )
+        controller.register_event_callback(
+            "publish.process.stopped", self._on_publish_stopped
+        )
+        return controller
+
+    def _lock_ui(self, plugin_label=None):
+        message = "Publishing..."
+        if plugin_label:
+            message += f"\n{plugin_label}"
+        try:
+            self.communication_obj.lock_ui(message, "AYON Publisher")
+        except Exception:
+            # Publishing must not fail because TVPaint can't be locked
+            log.warning("Failed to lock TVPaint UI.", exc_info=True)
+
+    def _on_publish_started(self):
+        self._lock_ui()
+
+    def _on_publish_plugin_changed(self, event):
+        self._lock_ui(event["plugin_label"])
+
+    def _on_publish_stopped(self):
+        # Stopped also when publishing failed, was stopped by user or
+        #   stopped after validation, user can interact with TVPaint
+        try:
+            self.communication_obj.unlock_ui()
+        except Exception:
+            log.warning("Failed to unlock TVPaint UI.", exc_info=True)
 
     def scene_inventory_tool(self):
         log.info("Triggering Scene inventory tool")
