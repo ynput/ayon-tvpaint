@@ -1,0 +1,170 @@
+name: 🔨 TVPaint Plugin Build
+
+on:
+  push:
+    branches: [ develop ]
+    paths:
+      - "tvpaint_plugin/**"
+      - ".github/workflows/tvpaint_plugin_build.yml"
+  pull_request:
+    branches: [ develop ]
+    paths:
+      - "tvpaint_plugin/**"
+      - ".github/workflows/tvpaint_plugin_build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Public TVPaint Animation SDK (MIT), pinned for reproducible builds.
+  #   It supports only 64-bit targets, so 32-bit Windows is not built here.
+  TVPAINT_SDK_REPOSITORY: TVPaint-Developpement/TVPaintAnimationSDK
+  TVPAINT_SDK_REF: 73e65f76ba2fc667813fda37cc5cf57f3b1621ab
+  CARGO_TERM_COLOR: always
+  PLUGIN_DIR: client/ayon_tvpaint/tvpaint_plugin
+
+jobs:
+  lint:
+    name: Lint (fmt, clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TVPAINT_SDK_REPOSITORY }}
+          ref: ${{ env.TVPAINT_SDK_REF }}
+          path: tvpaint-sdk
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal -c rustfmt -c clippy && rustup default stable
+      - name: cargo fmt --check
+        # Existing sources are not formatted yet, make it blocking once they are.
+        continue-on-error: true
+        working-directory: tvpaint_plugin
+        run: cargo fmt --check
+      - name: cargo clippy
+        working-directory: tvpaint_plugin
+        env:
+          TVPAINT_SDK_DIR: ${{ github.workspace }}/tvpaint-sdk
+        run: cargo clippy --all-targets -- -D warnings
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TVPAINT_SDK_REPOSITORY }}
+          ref: ${{ env.TVPAINT_SDK_REF }}
+          path: tvpaint-sdk
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal -c clippy --target x86_64-pc-windows-msvc && rustup default stable
+      - name: cargo clippy
+        working-directory: tvpaint_plugin
+        env:
+          TVPAINT_SDK_DIR: ${{ github.workspace }}/tvpaint-sdk
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        working-directory: tvpaint_plugin
+        env:
+          TVPAINT_SDK_DIR: ${{ github.workspace }}/tvpaint-sdk
+        run: cargo test
+      - name: cargo build
+        working-directory: tvpaint_plugin
+        env:
+          TVPAINT_SDK_DIR: ${{ github.workspace }}/tvpaint-sdk
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Stage plugin
+        shell: bash
+        run: |
+          dst="dist/$PLUGIN_DIR/windows_x64/plugin"
+          mkdir -p "$dst"
+          cp tvpaint_plugin/target/x86_64-pc-windows-msvc/release/AYONPlugin.dll "$dst/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tvpaint-plugin-windows_x64
+          path: dist/
+          if-no-files-found: error
+
+  linux:
+    name: Linux (Rocky Linux 8)
+    runs-on: ubuntu-latest
+    # glibc 2.28, so the plugin runs on Rocky 8+ and Ubuntu 20.04+.
+    container: rockylinux:8
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y gcc git
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TVPAINT_SDK_REPOSITORY }}
+          ref: ${{ env.TVPAINT_SDK_REF }}
+          path: tvpaint-sdk
+      - name: Install Rust
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: cargo test
+        working-directory: tvpaint_plugin
+        run: TVPAINT_SDK_DIR="$GITHUB_WORKSPACE/tvpaint-sdk" cargo test
+      - name: cargo build
+        working-directory: tvpaint_plugin
+        run: TVPAINT_SDK_DIR="$GITHUB_WORKSPACE/tvpaint-sdk" cargo build --release
+      - name: Stage plugin
+        run: |
+          dst="dist/$PLUGIN_DIR/linux/plugin"
+          mkdir -p "$dst"
+          cp tvpaint_plugin/target/release/libAYONPlugin.so "$dst/AYONPlugin.so"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tvpaint-plugin-linux
+          path: dist/
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TVPAINT_SDK_REPOSITORY }}
+          ref: ${{ env.TVPAINT_SDK_REF }}
+          path: tvpaint-sdk
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: cargo test
+        working-directory: tvpaint_plugin
+        env:
+          TVPAINT_SDK_DIR: ${{ github.workspace }}/tvpaint-sdk
+        run: cargo test
+      - name: Build universal bundle
+        env:
+          TVPAINT_SDK_DIR: ${{ github.workspace }}/tvpaint-sdk
+        run: ./tvpaint_plugin/build_macos.sh
+      - name: Stage plugin
+        run: |
+          dst="dist/$PLUGIN_DIR/macos/plugin"
+          mkdir -p "$dst"
+          cp -R "$PLUGIN_DIR/macos/plugin/AYONPlugin.bundle" "$dst/"
+          lipo -info "$dst/AYONPlugin.bundle/Contents/MacOS/AYONPlugin"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tvpaint-plugin-macos
+          path: dist/
+          if-no-files-found: error
+
+  merge:
+    name: Merge artifacts
+    runs-on: ubuntu-latest
+    needs: [ windows, linux, macos ]
+    steps:
+      - uses: actions/upload-artifact/merge@v4
+        with:
+          name: tvpaint-plugin
+          pattern: tvpaint-plugin-*
