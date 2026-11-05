@@ -366,21 +366,36 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         filepaths_by_layer_id = {}
         for layer_id, render_data in extraction_data_by_layer_id.items():
             layer = layers_by_id[layer_id]
+            # Layer is rendered with 100% density and opacity is applied
+            #   to rendered images afterwards, unless it should be ignored
+            # - the only way how to get current density is to set new
+            #   value which returns previous value
+            # - 'tv_layerdensity' works on current layer, so the layer
+            #   must be set as current first
+            _, density_output = execute_george_batch([
+                f"tv_layerset {layer_id}",
+                "tv_layerdensity 100",
+            ])
+            layer_density = int(density_output)
+
             transparency = 1.0
             if not ignore_layer_opacity:
-                # The only way how to get current transparency is to set new
-                #   value which returns previous value.
-                transparency_int = int(execute_george("tv_layerdensity 100"))
-                execute_george(f"tv_layerdensity {transparency_int}")
-                transparency = float(transparency_int) / 100.0
+                transparency = float(layer_density) / 100.0
 
             # Make sure transparent images are transparent
             if layer_id in transparent_layer_ids:
                 transparency = 0.0
 
-            filepaths_by_layer_id[layer_id] = self._render_layer(
-                render_data, layer, output_dir, transparency
-            )
+            try:
+                filepaths_by_layer_id[layer_id] = self._render_layer(
+                    render_data, layer, output_dir, transparency
+                )
+            finally:
+                # Set density back to original value
+                execute_george_batch([
+                    f"tv_layerset {layer_id}",
+                    f"tv_layerdensity {layer_density}",
+                ])
 
         # Prepare final filepaths where compositing should store result
         output_filepaths_by_frame = {}
