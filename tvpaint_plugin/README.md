@@ -99,9 +99,11 @@ The project doesn't have to match. TVPaint's current context, project included, 
 Requirements:
 - Rust 1.83+ (https://rustup.rs)
 - C compiler (MSVC Build Tools on Windows, Xcode command line tools on macOS, gcc on Linux)
-- TVPaint SDK, which you can request from TVPaint support. It is not redistributable.
+- TVPaint SDK, one of:
+  - Public SDK from https://github.com/TVPaint-Developpement/TVPaintAnimationSDK (MIT). It supports only 64-bit targets, so it can't build the 32-bit Windows plugin.
+  - SDK from TVPaint support, with `include/plugdllx.h` and `lib/dllx.c`. It is not redistributable.
 
-Set `TVPAINT_SDK_DIR` to the SDK root (the folder containing `include/` and `lib/dllx.c`) and build:
+Set `TVPAINT_SDK_DIR` to the SDK root (the repository root of the public SDK, or the folder containing `include/` and `lib/` of the other SDK) and build:
 
 ```shell
 cargo build --release
@@ -156,10 +158,16 @@ TVPaint loads plugins also from `plugins` in the active user profile (e.g. `~/Li
 
 TVPaint on macOS stores image pixels in `.tvpp` files as ARGB, on Windows and Linux as BGRA. The order is stored in the `DPEL` chunk of the file and TVPaint reads both, so files can be shared between platforms.
 
+## CI
+
+`.github/workflows/tvpaint_plugin_build.yml` runs when a pull request changes `tvpaint_plugin/`. It uses the public SDK pinned to a commit, runs clippy, `cargo fmt --check` (not blocking yet) and tests, and builds Windows x64, Linux (Rocky Linux 8) and macOS universal plugins. They are uploaded as the `tvpaint-plugin` workflow artifact, laid out like `client/ayon_tvpaint/tvpaint_plugin`. The 32-bit Windows plugin is not built in CI.
+
+To update the committed plugins, run the workflow manually (Actions > TVPaint Plugin Build > Run workflow) on your branch. It commits the Windows x64, Linux and macOS plugins to that branch when they changed. `develop` is protected, so run it on a pull request branch. Build and commit the 32-bit Windows plugin manually.
+
 ## Layout
 
 - `src/lib.rs`: `PI_*` entry points called by TVPaint, menu, and request handling.
 - `src/server.rs`: websocket server thread and server file.
 - `src/sdk.rs`: bindings to the SDK host functions.
 - `src/shim.c`: exposes SDK constants and `PIFilter` fields so they aren't duplicated in Rust.
-- `build.rs`: compiles `dllx.c` from the SDK together with `shim.c`.
+- `build.rs`: compiles the SDK host functions (`dllx.c` or `pi-private.c`) together with `shim.c`.

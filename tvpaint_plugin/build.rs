@@ -1,9 +1,14 @@
-//! Compile the TVPaint SDK host functions ('dllx.c') and the small C shim
-//! exposing SDK constants and 'PIFilter' fields to Rust.
+//! Compile the TVPaint SDK host functions and the small C shim exposing
+//! SDK constants and 'PIFilter' fields to Rust.
 //!
-//! The SDK is not redistributable, so its location must be passed with
-//! the 'TVPAINT_SDK_DIR' environment variable. The directory must contain
-//! 'include/plugdllx.h' and 'lib/dllx.c'.
+//! The SDK location must be passed with the 'TVPAINT_SDK_DIR' environment
+//! variable. Two layouts are supported:
+//! - SDK distributed by TVPaint support, with 'include/plugdllx.h' and
+//!   'lib/dllx.c'.
+//! - Public SDK (https://github.com/TVPaint-Developpement/TVPaintAnimationSDK),
+//!   with 'sdk/include/TVPaintAnimationSDK/TVPaintSDK.h' and
+//!   'sdk/src/TVPaintAnimationSDK/pi-private.c'. It supports only 64-bit
+//!   targets.
 
 use std::env;
 use std::path::PathBuf;
@@ -16,31 +21,58 @@ fn main() {
         Some(value) => PathBuf::from(value),
         None => panic!(
             "Environment variable 'TVPAINT_SDK_DIR' is not set. \
-             Set it to the TVPaint SDK root (folder with 'include' and 'lib')."
+             Set it to the TVPaint SDK root."
         ),
     };
-    let include_dir = sdk_dir.join("include");
-    let dllx_path = sdk_dir.join("lib").join("dllx.c");
-    if !include_dir.join("plugdllx.h").is_file() || !dllx_path.is_file() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let pointer_width = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap_or_default();
+
+    let legacy_include_dir = sdk_dir.join("include");
+    let legacy_source = sdk_dir.join("lib").join("dllx.c");
+    let public_include_dir = sdk_dir.join("sdk").join("include");
+    let public_source = sdk_dir
+        .join("sdk")
+        .join("src")
+        .join("TVPaintAnimationSDK")
+        .join("pi-private.c");
+
+    let (include_dir, source, is_public) =
+        if legacy_include_dir.join("plugdllx.h").is_file() && legacy_source.is_file() {
+            (legacy_include_dir, legacy_source, false)
+        } else if public_include_dir
+            .join("TVPaintAnimationSDK")
+            .join("TVPaintSDK.h")
+            .is_file()
+            && public_source.is_file()
+        {
+            (public_include_dir, public_source, true)
+        } else {
+            panic!(
+                "'{}' does not look like TVPaint SDK root (missing \
+                 'include/plugdllx.h' and 'lib/dllx.c', or \
+                 'sdk/include/TVPaintAnimationSDK/TVPaintSDK.h' and \
+                 'sdk/src/TVPaintAnimationSDK/pi-private.c').",
+                sdk_dir.display()
+            );
+        };
+    if is_public && pointer_width != "64" {
         panic!(
-            "'{}' does not look like TVPaint SDK root \
-             (missing 'include/plugdllx.h' or 'lib/dllx.c').",
-            sdk_dir.display()
+            "Public TVPaint SDK supports only 64-bit targets, \
+             use the SDK from TVPaint support for 32-bit builds."
         );
     }
-    println!("cargo:rerun-if-changed={}", dllx_path.display());
-
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let pointer_width =
-        env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap_or_default();
+    println!("cargo:rerun-if-changed={}", source.display());
 
     let mut build = cc::Build::new();
     build
         .include(&include_dir)
-        .file(&dllx_path)
+        .file(&source)
         .file("src/shim.c")
         // The SDK sources are old and noisy, we don't own them.
         .warnings(false);
+    if is_public {
+        build.define("AYON_PUBLIC_SDK", None);
+    }
 
     if target_os == "windows" {
         // TVPaint SDK uses 'WIN64'/'WIN32' to choose 'INTPTR' type.

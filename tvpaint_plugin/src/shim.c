@@ -7,8 +7,12 @@
 
 #include <string.h>
 
+#ifdef AYON_PUBLIC_SDK
+#include "TVPaintAnimationSDK/TVPaintSDK.h"
+#else
 #include "plugdllx.h"
 #include "pikeys.h"
+#endif
 
 const INTPTR AYON_PIRF_STANDARD_REQ = PIRF_STANDARD_REQ;
 const INTPTR AYON_PIRF_HIDDEN_REQ = PIRF_HIDDEN_REQ;
