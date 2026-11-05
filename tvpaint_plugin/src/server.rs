@@ -2,8 +2,9 @@
 //!
 //! TVPaint SDK functions can be called only from TVPaint's main thread, so
 //! the server never handles requests by itself. Requests are queued and
-//! the plugin takes them on each tick with 'Server::take_requests', then
-//! sends the result back with 'Responder::respond'.
+//! the plugin takes them on each tick with 'Server::take_events', then
+//! sends the result back with 'Responder::respond'. Closed connections
+//! are queued too, so the plugin can release what the client owned.
 //!
 //! Once listening, the server writes a JSON file with its port and the
 //! TVPaint process id to the servers directory, so other processes can
@@ -17,6 +18,7 @@
 //! the server forwards the request and routes the response back. These
 //! methods don't touch TVPaint and are handled in the server thread.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -24,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -41,6 +44,8 @@ pub const NO_HOST_CLIENT: i64 = -32001;
 pub const HOST_CLIENT_REGISTERED: i64 = -32002;
 /// Host client disconnected before it responded to forwarded request.
 pub const HOST_CLIENT_DISCONNECTED: i64 = -32003;
+/// 'lock_ui' or 'unlock_ui' called but other connection locked the UI.
+pub const UI_LOCKED: i64 = -32004;
 
 /// Request received from a client which must be handled in main thread.
 pub struct Request {
@@ -49,6 +54,13 @@ pub struct Request {
     pub id: Option<Value>,
     pub method: String,
     pub params: Value,
+}
+
+/// Event received from server thread, handled in main thread.
+pub enum Event {
+    Request(Request),
+    /// Connection with the id was closed.
+    Disconnected(u64),
 }
 
 pub struct RpcError {
@@ -78,7 +90,7 @@ struct ForwardedRequest {
 
 struct Shared {
     connections: Connections,
-    requests: mpsc::Sender<Request>,
+    requests: mpsc::Sender<Event>,
     info: Value,
     host_client: Mutex<Option<HostClient>>,
     /// Requests forwarded to host client by id used in forwarded request.
@@ -120,7 +132,9 @@ pub struct Server {
     port: u16,
     info_path: PathBuf,
     responder: Responder,
-    requests: mpsc::Receiver<Request>,
+    requests: mpsc::Receiver<Event>,
+    /// Event received by 'wait_for_events', not taken yet.
+    pending: RefCell<Vec<Event>>,
     shutdown: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -169,6 +183,7 @@ impl Server {
             info_path: server_file_path(servers_dir),
             responder: Responder { shared },
             requests,
+            pending: RefCell::new(Vec::new()),
             shutdown: Some(shutdown_sender),
             thread: Some(thread),
         };
@@ -188,9 +203,23 @@ impl Server {
         self.responder.clone()
     }
 
-    /// Take all requests waiting for main thread.
-    pub fn take_requests(&self) -> Vec<Request> {
-        self.requests.try_iter().collect()
+    /// Take all events waiting for main thread, in order they happened.
+    pub fn take_events(&self) -> Vec<Event> {
+        let mut events = std::mem::take(&mut *self.pending.borrow_mut());
+        events.extend(self.requests.try_iter());
+        events
+    }
+
+    /// Block until an event is received or the timeout passes.
+    ///
+    /// Avoids busy loop when TVPaint sends ticks without any pause.
+    pub fn wait_for_events(&self, timeout: Duration) {
+        if !self.pending.borrow().is_empty() {
+            return;
+        }
+        if let Ok(event) = self.requests.recv_timeout(timeout) {
+            self.pending.borrow_mut().push(event);
+        }
     }
 
     pub fn stop(&mut self) {
@@ -296,6 +325,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, connection_id: u64, sh
 
     shared.connections.lock().unwrap().remove(&connection_id);
     on_disconnect(connection_id, &shared);
+    let _ = shared.requests.send(Event::Disconnected(connection_id));
 }
 
 fn on_disconnect(connection_id: u64, shared: &Shared) {
@@ -372,7 +402,7 @@ fn handle_text(text: &str, connection_id: u64, shared: &Shared) -> Option<String
         },
         _ => {
             let request = Request { connection_id, id, method, params };
-            let _ = shared.requests.send(request);
+            let _ = shared.requests.send(Event::Request(request));
             return None;
         }
     };

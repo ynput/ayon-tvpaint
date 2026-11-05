@@ -21,7 +21,9 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use sdk::{Filter, IntPtr, PIFilter};
-use server::{Request, RpcError, Server, INTERNAL_ERROR, INVALID_PARAMS, METHOD_NOT_FOUND};
+use server::{
+    Event, Request, RpcError, Server, INTERNAL_ERROR, INVALID_PARAMS, METHOD_NOT_FOUND, UI_LOCKED,
+};
 
 /// Subfolder of AYON local directory where server files are stored.
 const SERVERS_SUBDIR: &str = "tvpaint_servers";
@@ -37,6 +39,18 @@ const MENU_HEIGHT_OFFSET: i32 = 5;
 const MENU_X_POS: i32 = 9;
 const MENU_Y_POS: i32 = 5;
 
+const DEFAULT_LOCK_MESSAGE: &str = "AYON is working, please wait...";
+const LOCK_MIN_WIDTH: i32 = 300;
+const LOCK_MAX_WIDTH: i32 = 900;
+/// Approximate width of a character, the SDK can't measure text.
+const LOCK_CHAR_WIDTH: i32 = 7;
+const LOCK_ROW_HEIGHT: i32 = 20;
+const LOCK_MARGIN: i32 = 10;
+/// Id of the first message line button, far from menu button ids.
+const LOCK_FIRST_BUTTON_ID: i32 = 100_000;
+/// Maximum wait for a request on a tick of the locking requester.
+const LOCK_TICK_WAIT: std::time::Duration = std::time::Duration::from_millis(10);
+
 struct MenuItem {
     label: String,
     help: String,
@@ -46,6 +60,17 @@ struct MenuItem {
 struct Menu {
     title: String,
     items: Vec<MenuItem>,
+}
+
+/// User interaction with TVPaint is locked by a client.
+struct UiLock {
+    /// Connection which locked the UI, the lock is released when it
+    /// disconnects.
+    owner: u64,
+    title: String,
+    lines: Vec<String>,
+    /// Message changed and the locking requester must be updated.
+    changed: bool,
 }
 
 #[derive(Default)]
@@ -63,6 +88,16 @@ struct State {
     /// Requests are being processed, avoid nested processing when
     /// a george script makes TVPaint send ticks.
     processing: bool,
+    lock: Option<UiLock>,
+    /// Locking requester was opened and was not closed yet.
+    lock_opened: bool,
+    /// Locking requester, 0 until TVPaint sends a message for it.
+    ///
+    /// 'TVOpenReq' returns 0 for 'PIRF_LOCK_REQ', so the requester is
+    /// recognized as the first unknown requester sending a message.
+    lock_req: IntPtr,
+    /// Number of message line buttons in the locking requester.
+    lock_buttons: i32,
 }
 
 thread_local! {
@@ -301,6 +336,8 @@ fn handle_request(filter: Filter, request: &Request) -> Result<Value, RpcError> 
         "execute_george_batch" => execute_george_batch(filter, &request.params),
         "get_layer_ids" => get_layer_ids(filter),
         "get_group_count" => get_group_count(filter),
+        "lock_ui" => lock_ui(request),
+        "unlock_ui" => unlock_ui(request.connection_id),
         "define_menu" => {
             let menu =
                 parse_menu(&request.params).map_err(|error| RpcError::new(INVALID_PARAMS, error))?;
@@ -457,18 +494,30 @@ fn process_requests(filter: Filter) {
             return None;
         }
         let server = state.server.as_ref()?;
-        let requests = server.take_requests();
-        if requests.is_empty() {
+        let events = server.take_events();
+        if events.is_empty() {
             return None;
         }
         state.processing = true;
-        Some((server.responder(), requests))
+        Some((server.responder(), events))
     });
-    let Some((responder, requests)) = taken else {
+    let Some((responder, events)) = taken else {
         return;
     };
 
-    for request in requests {
+    for event in events {
+        let request = match event {
+            Event::Request(request) => request,
+            Event::Disconnected(connection_id) => {
+                // Client can't unlock the UI anymore
+                with_state(|state| {
+                    if state.lock.as_ref().is_some_and(|lock| lock.owner == connection_id) {
+                        state.lock = None;
+                    }
+                });
+                continue;
+            }
+        };
         // Client would wait forever for the response, and 'processing'
         //   would stay set, if the panic was caught only in 'PI_Msg'
         let result = catch_unwind(AssertUnwindSafe(|| handle_request(filter, &request)))
@@ -478,6 +527,166 @@ fn process_requests(filter: Filter) {
         responder.respond(&request, result);
     }
     with_state(|state| state.processing = false);
+}
+
+// --- UI lock ---
+
+/// Lock user interaction with TVPaint, or change the message of the lock.
+///
+/// The UI is locked on the next tick, after all received requests are
+/// handled. Requests are handled also while the UI is locked.
+fn lock_ui(request: &Request) -> Result<Value, RpcError> {
+    let text = |index: usize, name: &str| match param(&request.params, index, name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(RpcError::new(INVALID_PARAMS, format!("'{name}' must be a string"))),
+    };
+    let message = text(0, "message")?.unwrap_or_else(|| DEFAULT_LOCK_MESSAGE.into());
+    let title = text(1, "title")?;
+    let lines = message.lines().map(str::to_string).collect();
+    with_state(|state| {
+        if let Some(lock) = &state.lock {
+            if lock.owner != request.connection_id {
+                return Err(RpcError::new(UI_LOCKED, "UI is locked by another client"));
+            }
+        }
+        // Changing only the message keeps the title
+        let title = title
+            .or_else(|| state.lock.as_ref().map(|lock| lock.title.clone()))
+            .unwrap_or_else(plugin_label);
+        state.lock = Some(UiLock {
+            owner: request.connection_id,
+            title,
+            lines,
+            changed: true,
+        });
+        Ok(Value::Null)
+    })
+}
+
+fn unlock_ui(connection_id: u64) -> Result<Value, RpcError> {
+    with_state(|state| {
+        if let Some(lock) = &state.lock {
+            if lock.owner != connection_id {
+                return Err(RpcError::new(UI_LOCKED, "UI is locked by another client"));
+            }
+        }
+        state.lock = None;
+        Ok(Value::Null)
+    })
+}
+
+fn lock_req_size(lines: &[String]) -> (i32, i32) {
+    let max_chars = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+    let width = (max_chars as i32 * LOCK_CHAR_WIDTH + 2 * LOCK_MARGIN)
+        .clamp(LOCK_MIN_WIDTH, LOCK_MAX_WIDTH);
+    let height = LOCK_ROW_HEIGHT * lines.len().max(1) as i32 + 2 * LOCK_MARGIN;
+    (width, height)
+}
+
+/// Recognize the locking requester by the first message TVPaint sends
+/// for it.
+fn register_lock_req(filter: Filter, req: IntPtr) {
+    let is_new = with_state(|state| {
+        let unknown = req != 0 && req != state.menu_req && req != state.tick_req;
+        if state.lock_opened && state.lock_req == 0 && unknown {
+            state.lock_req = req;
+            return true;
+        }
+        false
+    });
+    if is_new {
+        // Ticks are needed to process requests while the UI is locked
+        filter.grab_ticks_no_wait(req);
+    }
+}
+
+/// Open, update or close the locking requester to match the lock.
+fn update_lock(filter: Filter) {
+    enum Action {
+        Open(String, Vec<String>),
+        Update(IntPtr, String, Vec<String>, i32),
+        Close(IntPtr),
+    }
+
+    let action = with_state(|state| {
+        // Never start modal loop while a george command is running
+        if state.processing {
+            return None;
+        }
+        let req = state.lock_req;
+        let old_buttons = state.lock_buttons;
+        match (state.lock.as_mut(), state.lock_opened) {
+            (Some(lock), false) => {
+                state.lock_opened = true;
+                Some(Action::Open(lock.title.clone(), lock.lines.clone()))
+            }
+            (Some(lock), true) if lock.changed && req != 0 => {
+                lock.changed = false;
+                Some(Action::Update(req, lock.title.clone(), lock.lines.clone(), old_buttons))
+            }
+            (None, true) if req != 0 => Some(Action::Close(req)),
+            _ => None,
+        }
+    });
+
+    match action {
+        None => {}
+        Some(Action::Open(title, lines)) => {
+            let (width, height) = lock_req_size(&lines);
+            let flags = unsafe {
+                sdk::AYON_PIRF_LOCK_REQ | sdk::AYON_PIRF_NO_CLOSE_REQ | sdk::AYON_PIRF_CENTER_REQ
+            };
+            // May run a modal loop until the requester is closed, its
+            //   messages, ticks included, are sent to 'PI_Msg'
+            filter.open_req(width, height, flags, &title);
+        }
+        Some(Action::Update(req, title, lines, old_buttons)) => {
+            for index in 0..old_buttons {
+                filter.remove_button(req, LOCK_FIRST_BUTTON_ID + index);
+            }
+            filter.set_req_title(req, &title);
+            let (width, height) = lock_req_size(&lines);
+            let info = filter.req_info(req);
+            filter.resize_req(req, info.x, info.y, width, height);
+            let flags = unsafe { sdk::AYON_PIRBF_BUTTON_FLAT };
+            let mut y_pos = LOCK_MARGIN;
+            for (index, line) in lines.iter().enumerate() {
+                let id = LOCK_FIRST_BUTTON_ID + index as i32;
+                filter.add_button(req, LOCK_MARGIN, y_pos, width - 2 * LOCK_MARGIN, id, flags, line);
+                y_pos += LOCK_ROW_HEIGHT;
+            }
+            with_state(|state| state.lock_buttons = lines.len() as i32);
+        }
+        Some(Action::Close(req)) => {
+            filter.close_req(req);
+            // TVPaint may not send close message when plugin closes it
+            reset_lock_req(req);
+        }
+    }
+}
+
+/// Ticks of the locking requester come without any pause, which would
+/// keep a CPU core busy. Wait a moment for a request instead.
+fn wait_for_lock_tick(req: IntPtr) {
+    with_state(|state| {
+        if req == 0 || state.lock_req != req || state.processing {
+            return;
+        }
+        if let Some(server) = &state.server {
+            server.wait_for_events(LOCK_TICK_WAIT);
+        }
+    });
+}
+
+fn reset_lock_req(req: IntPtr) {
+    with_state(|state| {
+        if state.lock_req == req {
+            state.lock_req = 0;
+            state.lock_opened = false;
+            state.lock_buttons = 0;
+        }
+    });
 }
 
 fn on_button_up(filter: Filter, button_id: i32) {
@@ -493,6 +702,18 @@ fn on_button_up(filter: Filter, button_id: i32) {
 }
 
 fn on_close(filter: Filter, req: IntPtr, closed_by_shutdown: IntPtr) {
+    let is_lock = with_state(|state| {
+        let is_lock = req != 0 && state.lock_req == req;
+        if is_lock && closed_by_shutdown != 0 {
+            state.lock = None;
+        }
+        is_lock
+    });
+    if is_lock {
+        // Opened again on next tick if the UI is still locked
+        reset_lock_req(req);
+        return;
+    }
     let (is_menu, is_ticker) = with_state(|state| {
         if state.menu_req == req {
             state.menu_req = 0;
@@ -614,8 +835,13 @@ pub unsafe extern "system" fn PI_Msg(
             }
         };
 
+        register_lock_req(filter, req);
+
         if event == sdk::AYON_PICBREQ_BUTTON_UP {
-            on_button_up(filter, arg(0) as i32);
+            // Message lines of the locking requester are buttons too
+            if with_state(|state| state.lock_req != req) {
+                on_button_up(filter, arg(0) as i32);
+            }
         } else if event == sdk::AYON_PICBREQ_CLOSE {
             on_close(filter, req, arg(4));
         } else if event == sdk::AYON_PICBREQ_OPEN {
@@ -626,7 +852,9 @@ pub unsafe extern "system" fn PI_Msg(
             if with_state(|state| state.menu_changed) {
                 rebuild_menu(filter);
             }
+            wait_for_lock_tick(req);
             process_requests(filter);
+            update_lock(filter);
         }
         1
     })

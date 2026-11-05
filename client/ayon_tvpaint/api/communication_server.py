@@ -7,6 +7,7 @@ import inspect
 import itertools
 import subprocess
 import collections
+import contextlib
 import asyncio
 import ctypes
 import logging
@@ -1504,6 +1505,52 @@ class BaseCommunicator:
 
         """
         return self.send_request("get_group_count")
+
+    def lock_ui(self, message=None, title=None):
+        """Block user interaction with TVPaint.
+
+        TVPaint shows a modal window with the message. Calling it again
+        while the UI is locked changes the message, title is kept when
+        not passed. George commands still work while the UI is locked.
+
+        The lock belongs to this connection. It is released by
+        'unlock_ui', or by TVPaint when the connection closes, e.g. when
+        the process crashes.
+
+        Args:
+            message (Optional[str]): Message shown to the user, can have
+                multiple lines.
+            title (Optional[str]): Title of the window.
+
+        Raises:
+            TVPaintRpcError: Other client locked the UI.
+
+        """
+        params = {}
+        if message is not None:
+            params["message"] = message
+        if title is not None:
+            params["title"] = title
+        self.send_request("lock_ui", params)
+
+    def unlock_ui(self):
+        """Allow user interaction with TVPaint locked by 'lock_ui'."""
+        self.send_request("unlock_ui")
+
+    @contextlib.contextmanager
+    def ui_locked(self, message=None, title=None):
+        """Context manager blocking user interaction with TVPaint.
+
+        Example:
+            >>> with communicator.ui_locked("Publishing..."):
+            ...     communicator.execute_george("tv_Version")
+
+        """
+        self.lock_ui(message, title)
+        try:
+            yield
+        finally:
+            self.unlock_ui()
 
     def execute_george_through_file(self, george_script):
         """Execute george script with temp file.
