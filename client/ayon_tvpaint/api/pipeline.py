@@ -242,9 +242,6 @@ class TVPaintHost(HostBase, IWorkfileHost, ILoadHost, IPublishHost):
         # Path is the rest of the line and must not be quoted
         return execute_george(f"tv_SaveProject {george_path(filepath)}")
 
-    def work_root(self, session):
-        return session["AYON_WORKDIR"]
-
     def get_current_workfile(self):
         # TVPaint returns a '\' character when no scene is currently opened
         current_workfile = execute_george("tv_GetProjectName")
