@@ -168,3 +168,31 @@ jobs:
         with:
           name: tvpaint-plugin
           pattern: tvpaint-plugin-*
+
+  commit:
+    name: Commit plugins
+    # Only manual runs commit, to the branch the workflow was dispatched on.
+    #   The 32-bit Windows plugin is built and committed manually.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: [ lint, merge ]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tvpaint-plugin
+      - name: Commit plugins
+        run: |
+          # Artifacts don't keep file permissions.
+          chmod 755 "$PLUGIN_DIR/macos/plugin/AYONPlugin.bundle/Contents/MacOS/AYONPlugin"
+          git add "$PLUGIN_DIR"
+          if git diff --cached --quiet; then
+            echo "Plugins are up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update TVPaint plugin builds" -m "Built from ${GITHUB_SHA} by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
