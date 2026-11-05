@@ -534,21 +534,10 @@ class ExtractSequence(pyblish.api.InstancePlugin):
         # Let TVPaint render layer's image
         execute_george_batch(george_script_lines)
 
-        # Images without alpha channel can't be composited correctly
-        sample_filepath = next(iter(rendered_filepaths), None)
-        if sample_filepath:
-            with Image.open(sample_filepath) as img:
-                mode = img.mode
-            if mode != "RGBA":
-                self.log.warning(
-                    f"Layer '{layer['name']}' was rendered without alpha"
-                    f" channel (mode '{mode}'), composite may be wrong."
-                )
-
         # Apply layer opacity
         if transparency != 1.0:
             for filepath in rendered_filepaths:
-                img = Image.open(filepath).convert("RGBA")
+                img = Image.open(filepath)
                 r, g, b, a = img.split()
                 a = a.point(lambda i: i * transparency)
                 img = Image.merge("RGBA", (r, g, b, a))

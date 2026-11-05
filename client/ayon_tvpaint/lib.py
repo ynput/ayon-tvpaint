@@ -665,9 +665,7 @@ def composite_images(input_image_paths, output_filepath):
 
     img_obj = None
     for image_filepath in input_image_paths:
-        # 'alpha_composite' requires both images to be RGBA, but TVPaint
-        #   may save PNG without alpha channel (e.g. RGB)
-        _img_obj = Image.open(image_filepath).convert("RGBA")
+        _img_obj = Image.open(image_filepath)
         if img_obj is None:
             img_obj = _img_obj
         else:
