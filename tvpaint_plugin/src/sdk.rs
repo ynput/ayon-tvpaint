@@ -1,4 +1,4 @@
-//! Bindings to TVPaint SDK host functions compiled from 'dllx.c'.
+//! Bindings to TVPaint host functions from 'host.c'.
 //!
 //! All functions must be called from TVPaint's main thread, i.e. from
 //! inside one of the 'PI_*' callbacks.
@@ -47,7 +47,8 @@ extern "C" {
     fn ayon_filter_version(filter: *mut PIFilter) -> c_int;
     fn ayon_filter_revision(filter: *mut PIFilter) -> c_int;
 
-    // Host functions from 'dllx.c'
+    // Host functions from 'host.c', named like in the SDK.
+    #[link_name = "ayon_TVOpenReq"]
     fn TVOpenReq(
         filter: *mut PIFilter,
         width: c_int,
@@ -57,6 +58,7 @@ extern "C" {
         flags: IntPtr,
         name: *const c_char,
     ) -> IntPtr;
+    #[link_name = "ayon_TVOpenFilterReqEx"]
     fn TVOpenFilterReqEx(
         filter: *mut PIFilter,
         width: c_int,
@@ -66,10 +68,15 @@ extern "C" {
         req_flags: IntPtr,
         menu_flags: IntPtr,
     ) -> IntPtr;
+    #[link_name = "ayon_TVCloseReq"]
     fn TVCloseReq(filter: *mut PIFilter, req: IntPtr);
+    #[link_name = "ayon_TVSetReqTitle"]
     fn TVSetReqTitle(filter: *mut PIFilter, req: IntPtr, title: *const c_char) -> c_int;
+    #[link_name = "ayon_TVReqToFront"]
     fn TVReqToFront(filter: *mut PIFilter, req: IntPtr) -> c_int;
+    #[link_name = "ayon_TVDisplayReq"]
     fn TVDisplayReq(filter: *mut PIFilter, req: IntPtr, display: c_int) -> c_int;
+    #[link_name = "ayon_TVInfoReq"]
     fn TVInfoReq(
         filter: *mut PIFilter,
         req: IntPtr,
@@ -78,6 +85,7 @@ extern "C" {
         w: *mut c_int,
         h: *mut c_int,
     ) -> c_int;
+    #[link_name = "ayon_TVResizeReq"]
     fn TVResizeReq(
         filter: *mut PIFilter,
         req: IntPtr,
@@ -86,7 +94,9 @@ extern "C" {
         w: c_int,
         h: c_int,
     ) -> c_int;
+    #[link_name = "ayon_TVGrabTicks"]
     fn TVGrabTicks(filter: *mut PIFilter, req: IntPtr, flag: c_int) -> c_int;
+    #[link_name = "ayon_TVAddButtonReq"]
     fn TVAddButtonReq(
         filter: *mut PIFilter,
         req: IntPtr,
@@ -98,16 +108,22 @@ extern "C" {
         flags: IntPtr,
         name: *const c_char,
     ) -> c_int;
+    #[link_name = "ayon_TVRemoveButtonReq"]
     fn TVRemoveButtonReq(filter: *mut PIFilter, req: IntPtr, id: c_int) -> c_int;
+    #[link_name = "ayon_TVSetButtonInfoText"]
     fn TVSetButtonInfoText(
         filter: *mut PIFilter,
         req: IntPtr,
         id: c_int,
         text: *const c_char,
     ) -> c_int;
+    #[link_name = "ayon_TVWarning"]
     fn TVWarning(filter: *mut PIFilter, text: *const c_char);
+    #[link_name = "ayon_TVSendCmd"]
     fn TVSendCmd(filter: *mut PIFilter, cmd: *const c_char, result: *mut c_char) -> c_int;
+    #[link_name = "ayon_TVExecute"]
     fn TVExecute(filter: *mut PIFilter) -> c_int;
+    #[link_name = "ayon_TVReadUserString"]
     fn TVReadUserString(
         filter: *mut PIFilter,
         section: *const c_char,
@@ -116,6 +132,7 @@ extern "C" {
         default: *const c_char,
         max_chars: c_int,
     ) -> c_int;
+    #[link_name = "ayon_TVWriteUserString"]
     fn TVWriteUserString(
         filter: *mut PIFilter,
         section: *const c_char,

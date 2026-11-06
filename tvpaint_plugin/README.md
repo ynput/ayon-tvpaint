@@ -101,9 +101,9 @@ Requirements:
 - C compiler (MSVC Build Tools on Windows, Xcode command line tools on macOS, gcc on Linux)
 - TVPaint SDK, one of:
   - Public SDK from https://github.com/TVPaint-Developpement/TVPaintAnimationSDK (MIT). It supports only 64-bit targets, so it can't build the 32-bit Windows plugin.
-  - SDK from TVPaint support, with `include/plugdllx.h` and `lib/dllx.c`. It is not redistributable.
+  - SDK from TVPaint support, with `include/plugdllx.h`. It is not redistributable.
 
-Set `TVPAINT_SDK_DIR` to the SDK root (the repository root of the public SDK, or the folder containing `include/` and `lib/` of the other SDK) and build:
+Set `TVPAINT_SDK_DIR` to the SDK root (the repository root of the public SDK, or the folder containing `include/` of the other SDK) and build:
 
 ```shell
 cargo build --release
@@ -170,4 +170,5 @@ The 32-bit Windows plugin is not built in CI, build and commit it manually.
 - `src/server.rs`: websocket server thread and server file.
 - `src/sdk.rs`: bindings to the SDK host functions.
 - `src/shim.c`: exposes SDK constants and `PIFilter` fields so they aren't duplicated in Rust.
-- `build.rs`: compiles the SDK host functions (`dllx.c` or `pi-private.c`) together with `shim.c`.
+- `src/host.c`: TVPaint host functions used by the plugin. Only SDK headers are used, `dllx.c` and `pi-private.c` aren't compiled: `pi-private.c` of the public SDK passes too small argument arrays to TVPaint, which writes past them and crashes.
+- `build.rs`: compiles `host.c` and `shim.c` with the SDK headers.
