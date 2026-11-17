@@ -612,7 +612,6 @@ class QtTVPaintRpc:
             ("loader_tool", self.loader_tool),
             ("publish_tool", self.publish_tool),
             ("scene_inventory_tool", self.scene_inventory_tool),
-            ("library_loader_tool", self.library_loader_tool),
             ("experimental_tools", self.experimental_tools),
             ("open_workfile", self.open_workfile),
         ):
@@ -680,11 +679,6 @@ class QtTVPaintRpc:
     def scene_inventory_tool(self):
         log.info("Triggering Scene inventory tool")
         item = MainThreadItem(self.tools_helper.show_scene_inventory)
-        self._execute_in_main_thread(item, wait=False)
-
-    def library_loader_tool(self):
-        log.info("Triggering Library loader tool")
-        item = MainThreadItem(self.tools_helper.show_library_loader)
         self._execute_in_main_thread(item, wait=False)
 
     def experimental_tools(self):
@@ -1598,10 +1592,6 @@ class QtCommunicator(BaseCommunicator):
                 "callback": "publish_tool",
                 "label": "Publish",
                 "help": "Open publisher"
-            }, {
-                "callback": "library_loader_tool",
-                "label": "Library",
-                "help": "Open library loader tool"
             }, {
                 "callback": "experimental_tools",
                 "label": "Experimental tools",
