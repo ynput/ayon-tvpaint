@@ -892,7 +892,7 @@ class BaseCommunicator:
             return None
         major, edition = match.groups()
         return BaseCommunicator._get_profile_dir(os.path.join(
-            appdata, f"tvp animation {major} {edition}".lower()
+            appdata, BaseCommunicator._get_app_dir_name(major, edition)
         ))
 
     def _prepare_windows_plugin(self, launch_args):
@@ -1075,8 +1075,27 @@ class BaseCommunicator:
         return BaseCommunicator._get_profile_dir(os.path.join(
             os.path.expanduser("~"),
             ".tvp",
-            f"tvp animation {major} {edition}",
+            BaseCommunicator._get_app_dir_name(major, edition),
         ))
+
+    @staticmethod
+    def _get_app_dir_name(major, edition):
+        """Name of TVPaint user folder for major version and edition.
+
+        Pro edition has the edition in the name, e.g. 'tvp animation 11 pro',
+        Standard edition doesn't, e.g. 'tvp animation 11'.
+
+        Args:
+            major (str): Major version, e.g. '11'.
+            edition (str): Edition from executable name, e.g. 'pro' or 'std'.
+
+        Returns:
+            str: Folder name.
+        """
+        edition = edition.lower()
+        if edition in ("std", "standard"):
+            return f"tvp animation {major}"
+        return f"tvp animation {major} {edition}"
 
     @staticmethod
     def _get_profile_dir(app_dir):
@@ -1226,7 +1245,7 @@ class BaseCommunicator:
         return BaseCommunicator._get_profile_dir(os.path.join(
             os.path.expanduser("~"),
             "Library",
-            f"tvp animation {major} {edition}".lower(),
+            BaseCommunicator._get_app_dir_name(major, edition),
         ))
 
     def _prepare_macos_plugin(self, launch_args):
